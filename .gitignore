@@ -1,0 +1,12 @@
+bin/
+obj/
+.vs/
+*.user
+*.suo
+*.cache
+*.log
+*.tmp
+.idea/
+*.DotSettings.user
+.claude/
+.mcp.json

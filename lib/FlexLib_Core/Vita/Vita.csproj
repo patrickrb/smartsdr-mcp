@@ -1,0 +1,53 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <ProductVersion>8.0.30703</ProductVersion>
+    <AssemblyTitle>Vita</AssemblyTitle>
+    <Company>FlexRadio Systems</Company>
+    <Product>Vita</Product>
+    <Copyright>Copyright © 2012-2017 FlexRadio Systems. All rights reserved.</Copyright>
+    <Deterministic>false</Deterministic>
+    <Version>0.0.0.0</Version>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <TargetFrameworks>net462;net8.0-windows</TargetFrameworks>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <LangVersion>default</LangVersion>
+    <Configurations>Debug;Release</Configurations>
+    <Platforms>AnyCPU;x86;x64;arm64</Platforms>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <DebugType>full</DebugType>
+    <OutputPath>bin\$(Configuration)\</OutputPath>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+    <DebugType>pdbonly</DebugType>
+    <OutputPath>bin\$(Configuration)\</OutputPath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Debug|x86'">
+    <OutputPath>bin\$(Platform)\$(Configuration)\</OutputPath>
+    <DebugType>full</DebugType>
+    <CodeAnalysisIgnoreBuiltInRuleSets>true</CodeAnalysisIgnoreBuiltInRuleSets>
+    <CodeAnalysisIgnoreBuiltInRules>true</CodeAnalysisIgnoreBuiltInRules>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Release|x86'">
+    <OutputPath>bin\$(Platform)\$(Configuration)\</OutputPath>
+    <DebugType>pdbonly</DebugType>
+    <CodeAnalysisIgnoreBuiltInRuleSets>false</CodeAnalysisIgnoreBuiltInRuleSets>
+    <CodeAnalysisIgnoreBuiltInRules>false</CodeAnalysisIgnoreBuiltInRules>
+    <CodeAnalysisFailOnMissingRules>false</CodeAnalysisFailOnMissingRules>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="System.Data.DataSetExtensions" />
+    <Reference Include="Microsoft.CSharp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Util\Util.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Remove="obj\x86\Debug\.NETFramework,Version=v4.6.2.AssemblyAttributes.cs" />
+    <Compile Remove="obj\x86\Debug\net462\.NETFramework,Version=v4.6.2.AssemblyAttributes.cs" />
+    <Compile Remove="obj\x86\Debug\net462\Vita.AssemblyInfo.cs" />
+    <Compile Remove="obj\x86\Debug\net7.0-windows\.NETCoreApp,Version=v7.0.AssemblyAttributes.cs" />
+    <Compile Remove="obj\x86\Debug\net7.0-windows\Vita.AssemblyInfo.cs" />
+  </ItemGroup>
+</Project>

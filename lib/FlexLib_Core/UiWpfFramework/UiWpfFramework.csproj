@@ -1,0 +1,68 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <ProductVersion>8.0.30703</ProductVersion>
+    <RootNamespace>Flex.UiWpfFramework</RootNamespace>
+    <AssemblyName>Flex.UiWpfFramework</AssemblyName>
+    <LangVersion>default</LangVersion>
+    <AssemblyTitle>UiWpfFramework</AssemblyTitle>
+    <Company>FlexRadio Systems</Company>
+    <Product>UiWpfFramework</Product>
+    <Copyright>Copyright © 2012-2017 FlexRadio Systems. All rights reserved.</Copyright>
+    <Deterministic>false</Deterministic>
+    <Version>0.0.0.0</Version>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <UseWpf>true</UseWpf>
+    <TargetFrameworks>net462;net8.0-windows</TargetFrameworks>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <Configurations>Debug;Release</Configurations>
+    <Platforms>AnyCPU;x86;x64;arm64</Platforms>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <DebugType>full</DebugType>
+    <OutputPath>bin\$(Configuration)\</OutputPath>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+    <DebugType>pdbonly</DebugType>
+    <OutputPath>bin\$(Configuration)\</OutputPath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Debug|x86'">
+    <OutputPath>bin\$(Platform)\$(Configuration)\</OutputPath>
+    <DebugType>full</DebugType>
+    <CodeAnalysisIgnoreBuiltInRuleSets>false</CodeAnalysisIgnoreBuiltInRuleSets>
+    <CodeAnalysisIgnoreBuiltInRules>false</CodeAnalysisIgnoreBuiltInRules>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Release|x86'">
+    <OutputPath>bin\$(Configuration)\</OutputPath>
+    <DebugType>pdbonly</DebugType>
+    <CodeAnalysisIgnoreBuiltInRuleSets>false</CodeAnalysisIgnoreBuiltInRuleSets>
+    <CodeAnalysisIgnoreBuiltInRules>false</CodeAnalysisIgnoreBuiltInRules>
+  </PropertyGroup>
+  <PropertyGroup>
+    <PreBuildEvent />
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="PresentationCore" />
+    <Reference Include="PresentationFramework" />
+    <Reference Include="System.configuration" />
+    <Reference Include="System.Xaml" />
+    <Reference Include="System.Data.DataSetExtensions" />
+    <Reference Include="Microsoft.CSharp" />
+    <Reference Include="WindowsBase" />
+  </ItemGroup>
+  <ItemGroup>
+    <Resource Include="Mvvm\blankicon.ico" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="QRCoder" Version="1.6.0" />
+    <PackageReference Include="QRCoder.Xaml" Version="1.6.0" />
+    <PackageReference Include="System.ValueTuple" Version="4.5.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="System.Collections.Immutable" Version="9.0.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Remove="obj\x86\Debug\.NETFramework,Version=v4.6.2.AssemblyAttributes.cs" />
+    <Compile Remove="obj\x86\Release\.NETFramework,Version=v4.0,Profile=Client.AssemblyAttributes.cs" />
+    <Compile Remove="obj\x86\Release\.NETFramework,Version=v4.6.2.AssemblyAttributes.cs" />
+  </ItemGroup>
+</Project>

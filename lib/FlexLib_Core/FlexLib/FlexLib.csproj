@@ -1,0 +1,57 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <ProductVersion>8.0.30703</ProductVersion>
+    <RootNamespace>Flex.Smoothlake.FlexLib</RootNamespace>
+    <LangVersion>default</LangVersion>
+    <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
+    <AssemblyTitle>FlexLib</AssemblyTitle>
+    <Company>FlexRadio Systems</Company>
+    <Product>FlexLib</Product>
+    <Copyright>Copyright © 2018-2024 FlexRadio Systems. All rights reserved.</Copyright>
+    <Deterministic>false</Deterministic>
+    <Version>0.0.0.0</Version>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <TargetFramework>net9.0</TargetFramework>
+    <Configurations>Debug;Release</Configurations>
+    <Platforms>AnyCPU;x86;x64;arm64</Platforms>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
+    <DebugType>full</DebugType>
+    <OutputPath>bin\$(Configuration)\</OutputPath>
+  </PropertyGroup>
+  <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
+    <DebugType>pdbonly</DebugType>
+    <OutputPath>bin\$(Configuration)\</OutputPath>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Debug|x86'">
+    <OutputPath>bin\$(Platform)\$(Configuration)\</OutputPath>
+    <DebugType>full</DebugType>
+    <CodeAnalysisIgnoreBuiltInRuleSets>true</CodeAnalysisIgnoreBuiltInRuleSets>
+    <CodeAnalysisIgnoreBuiltInRules>true</CodeAnalysisIgnoreBuiltInRules>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)' == 'Release|x86'">
+    <OutputPath>bin\$(Configuration)\</OutputPath>
+    <DebugType>pdbonly</DebugType>
+    <CodeAnalysisIgnoreBuiltInRuleSets>true</CodeAnalysisIgnoreBuiltInRuleSets>
+    <CodeAnalysisIgnoreBuiltInRules>true</CodeAnalysisIgnoreBuiltInRules>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Util\Util.csproj" />
+    <ProjectReference Include="..\Vita\Vita.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="DotNetZip" Version="1.16.0" />
+    <PackageReference Include="System.Collections.Immutable" Version="9.0.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <Resource Include="Images\6000-Cutout.png" />
+    <Resource Include="Images\6300-small.png" />
+    <Resource Include="Images\6600.png" />
+    <Resource Include="Images\6600M.png" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Remove="obj\x86\Debug\.NETFramework,Version=v4.6.2.AssemblyAttributes.cs" />
+    <Compile Remove="obj\x86\Release\.NETFramework,Version=v4.0,Profile=Client.AssemblyAttributes.cs" />
+    <Compile Remove="obj\x86\Release\.NETFramework,Version=v4.6.2.AssemblyAttributes.cs" />
+  </ItemGroup>
+</Project>

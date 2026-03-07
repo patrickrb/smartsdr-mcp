@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\SmartSdrMcp.Radio\SmartSdrMcp.Radio.csproj" />
+    <ProjectReference Include="..\SmartSdrMcp.Audio\SmartSdrMcp.Audio.csproj" />
+    <ProjectReference Include="..\SmartSdrMcp.Cw\SmartSdrMcp.Cw.csproj" />
+    <ProjectReference Include="..\SmartSdrMcp.Qso\SmartSdrMcp.Qso.csproj" />
+    <ProjectReference Include="..\SmartSdrMcp.Ai\SmartSdrMcp.Ai.csproj" />
+    <ProjectReference Include="..\SmartSdrMcp.Tx\SmartSdrMcp.Tx.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ModelContextProtocol" Version="1.0.0" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <NoWarn>$(NoWarn);NU1605</NoWarn>
+  </PropertyGroup>
+
+</Project>
