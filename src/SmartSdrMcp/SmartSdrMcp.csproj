@@ -7,6 +7,7 @@
     <ProjectReference Include="..\SmartSdrMcp.Qso\SmartSdrMcp.Qso.csproj" />
     <ProjectReference Include="..\SmartSdrMcp.Ai\SmartSdrMcp.Ai.csproj" />
     <ProjectReference Include="..\SmartSdrMcp.Tx\SmartSdrMcp.Tx.csproj" />
+    <ProjectReference Include="..\SmartSdrMcp.Ssb\SmartSdrMcp.Ssb.csproj" />
     <ProjectReference Include="..\SmartSdrMcp.Mcp\SmartSdrMcp.Mcp.csproj" />
   </ItemGroup>
 

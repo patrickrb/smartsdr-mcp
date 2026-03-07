@@ -8,6 +8,7 @@ using SmartSdrMcp.Mcp.Resources;
 using SmartSdrMcp.Mcp.Tools;
 using SmartSdrMcp.Qso;
 using SmartSdrMcp.Radio;
+using SmartSdrMcp.Ssb;
 using SmartSdrMcp.Tx;
 
 const string MyCallsign = "K1AF";
@@ -38,6 +39,12 @@ builder.Services.AddSingleton<QsoTracker>(sp =>
 builder.Services.AddSingleton<ReplyGenerator>(_ =>
     new ReplyGenerator(MyCallsign, MyName));
 builder.Services.AddSingleton<TransmitController>();
+builder.Services.AddSingleton<SsbPipeline>(sp =>
+{
+    var audio = sp.GetRequiredService<AudioPipeline>();
+    var modelPath = Path.Combine(AppContext.BaseDirectory, "models", "ggml-base.en.bin");
+    return new SsbPipeline(audio, modelPath);
+});
 
 // MCP Server
 builder.Services.AddMcpServer()
@@ -45,6 +52,7 @@ builder.Services.AddMcpServer()
     .WithTools<RadioTools>()
     .WithTools<CwListenerTools>()
     .WithTools<CwTransmitTools>()
+    .WithTools<SsbListenerTools>()
     .WithResources<RadioStateResource>()
     .WithResources<CwLiveResource>()
     .WithResources<CwRecentResource>()

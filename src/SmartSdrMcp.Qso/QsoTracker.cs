@@ -12,6 +12,8 @@ public partial class QsoTracker
     private readonly object _lock = new();
 
     public QsoState CurrentState { get; private set; } = QsoState.Empty;
+    public string MyCallsign => _myCallsign;
+    public DateTime? LastMessageAtUtc { get; private set; }
 
     public event Action<QsoState>? StateChanged;
     public event Action<CwMessage>? MessageReceived;
@@ -30,6 +32,7 @@ public partial class QsoTracker
                 _recentMessages.RemoveRange(0, 50);
         }
 
+        LastMessageAtUtc = message.Timestamp;
         MessageReceived?.Invoke(message);
         UpdateState(message);
     }
@@ -83,7 +86,6 @@ public partial class QsoTracker
 
             case QsoStage.CqDetected:
             case QsoStage.Replied:
-                // Look for signal report
                 if (ContainsSignalReport(text))
                 {
                     CurrentState = CurrentState with
@@ -166,7 +168,6 @@ public partial class QsoTracker
 
     private static string? ExtractName(string text)
     {
-        // Look for "NAME <word>" or "NAME IS <word>"
         var match = Regex.Match(text, @"NAME\s+(?:IS\s+)?([A-Z]{2,})", RegexOptions.IgnoreCase);
         return match.Success ? match.Groups[1].Value : null;
     }
