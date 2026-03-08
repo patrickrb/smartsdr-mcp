@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using SmartSdrMcp.Audio;
 using Whisper.net;
 
@@ -10,6 +11,17 @@ public class SsbPipeline : IDisposable
     private const int TargetSampleRate = 16000;
     private const int BufferSeconds = 3;
     private const int BufferSize = TargetSampleRate * BufferSeconds;
+
+    private const string ContestPrompt =
+        "Ham radio SSB contest QSO. Stations exchange callsigns using NATO phonetics " +
+        "and signal reports. Common phrases: CQ contest, QRZ, you're 59, copy, roger, " +
+        "73, thanks for the QSO, again, over. Q-codes: QSL, QTH, QRM, QRN, QSY, QSO, QRP. " +
+        "Terms: kilowatt, barefoot, pileup, DX, twenty meters, fifteen meters, ten meters. " +
+        "Callsign prefixes: Whiskey, Kilo, November, Victor Echo, Delta Lima, Juliet Alpha. " +
+        "Phonetic alphabet: Alpha, Bravo, Charlie, Delta, Echo, Foxtrot, Golf, Hotel, " +
+        "India, Juliett, Kilo, Lima, Mike, November, Oscar, Papa, Quebec, Romeo, " +
+        "Sierra, Tango, Uniform, Victor, Whiskey, Xray, Yankee, Zulu.";
+
 
     private WhisperFactory? _factory;
     private bool _running;
@@ -177,9 +189,10 @@ public class SsbPipeline : IDisposable
             using var processor = _factory.CreateBuilder()
                 .WithLanguage("en")
                 .WithNoContext()
+                .WithPrompt(ContestPrompt)
                 .WithSegmentEventHandler((segment) =>
                 {
-                    var text = segment.Text.Trim();
+                    var text = StripParenthesized(segment.Text).Trim();
                     if (!string.IsNullOrWhiteSpace(text) && !IsHallucination(text))
                         decoded.Add(text);
                 })
@@ -207,6 +220,33 @@ public class SsbPipeline : IDisposable
             Console.Error.WriteLine($"[SSB ERROR] {ex.Message}");
         }
     }
+
+    private static readonly HashSet<string> HallucinationPatterns = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "(applause)", "(music)", "(laughter)", "(silence)", "(noise)",
+        "(buzzing)", "(static)", "(beeping)", "(clicking)", "(humming)",
+        "(sighs)", "(coughing)", "(breathing)", "(wind)", "(cheering)",
+        "Thank you.", "Thanks for watching.", "Bye.", "Bye bye.",
+        "Subscribe to my channel.", "Like and subscribe.",
+        "Thank you for watching.", "See you next time.",
+    };
+
+    private static bool IsHallucination(string text)
+    {
+        var cleaned = StripParenthesized(text).Trim();
+        if (string.IsNullOrWhiteSpace(cleaned))
+            return true;
+        if (HallucinationPatterns.Contains(cleaned))
+            return true;
+        return false;
+    }
+
+    private static string StripParenthesized(string text)
+    {
+        // Remove all (content) and [content] — Whisper hallucinations
+        return Regex.Replace(text, @"[\(\[][^\)\]]*[\)\]]", "");
+    }
+
 
     public void Dispose()
     {
