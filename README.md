@@ -29,6 +29,16 @@ The design keeps humans in the loop: no RF is ever emitted without explicit appr
 - Read current frequency, mode, TX state, and CW pitch
 - Set VFO frequency (e.g., `14.035` MHz for 20 m CW)
 - Set demodulation mode: `CW`, `USB`, `LSB`, `AM`, `FM`
+- List and configure all receiver slices (frequency, mode, filter, antenna, audio, etc.)
+- Adjust receiver passband filters, RIT/XIT offsets, and AGC settings
+- Control noise reduction (NR, NB, ANF, WNB) with individual levels
+- Read real-time meters: S-meter, SWR, forward/reflected power, PA temperature, voltage, ALC
+- Set RF transmit power and tune power levels
+- Manage Tracking Notch Filters (TNF) to null out interference
+- Control antenna tuner (ATU): status, enable/disable, auto-tune
+- Save, load, and delete memory channels
+- View and manage DX spots
+- Read GPS/GNSS data: grid square, coordinates, altitude, satellites
 
 ### CW (Morse Code) Decoding
 - Captures audio via the FlexRadio DAX (Digital Audio eXchange) interface
@@ -185,6 +195,29 @@ Or, if you prefer to run the compiled binary:
 | `set_active_slice` | `index` | Set the active slice by index |
 | `set_mode` | `mode` | Set the demodulation mode: `CW`, `USB`, `LSB`, `AM`, or `FM` |
 | `set_cw_profile` | `wpm?`, `pitch?`, `breakIn?`, `iambic?` | Set CW profile values in one operation |
+| `get_meters` | — | Get real-time meter readings (S-meter, SWR, power, ALC, voltage, PA temp, mic, compression) |
+| `get_filter` | — | Get current receiver passband filter bounds (low/high Hz) |
+| `set_filter` | `low`, `high` | Set receiver passband filter bounds in Hz |
+| `set_rit` | `enabled?`, `offsetHz?` | Set RIT (Receiver Incremental Tuning) |
+| `set_xit` | `enabled?`, `offsetHz?` | Set XIT (Transmitter Incremental Tuning) |
+| `list_slices` | — | List all receiver slices with full configuration |
+| `get_noise_reduction` | — | Get noise reduction settings (NR, NB, ANF, WNB) |
+| `set_noise_reduction` | `nrOn?`, `nrLevel?`, `nbOn?`, `nbLevel?`, `anfOn?`, `anfLevel?`, `wnbOn?`, `wnbLevel?` | Set noise reduction on the active slice |
+| `get_gps` | — | Get GPS data: lat, lon, grid square, altitude, satellites |
+| `list_tnfs` | — | List all Tracking Notch Filters |
+| `add_tnf` | `frequencyMHz` | Add a Tracking Notch Filter at a frequency |
+| `remove_tnf` | `tnfId` | Remove a Tracking Notch Filter by ID |
+| `get_rf_power` | — | Get current RF power, tune power, and max power level |
+| `set_rf_power` | `rfPower?`, `tunePower?` | Set RF transmit power (0-100) and/or tune power |
+| `get_atu_status` | — | Get antenna tuner status (present, enabled, tuning, bypass) |
+| `atu_tune` | — | Initiate ATU auto-tune cycle |
+| `list_memories` | — | List all saved memory channels |
+| `load_memory` | `index` | Load (recall) a saved memory channel |
+| `delete_memory` | `index` | Delete a saved memory channel |
+| `list_spots` | — | List all DX spots with callsign, frequency, mode, spotter |
+| `remove_spot` | `callsign` | Remove a DX spot by callsign |
+| `get_agc` | — | Get AGC settings (mode, threshold, off-level) |
+| `set_agc` | `mode?`, `threshold?`, `offLevel?` | Set AGC mode (off/slow/med/fast) and threshold |
 
 ### CW Listener Tools
 
