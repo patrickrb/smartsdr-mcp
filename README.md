@@ -297,12 +297,12 @@ Or, if you prefer to run the compiled binary:
 | Tool | Parameters | Description |
 |---|---|---|
 | `dx_hunter_load_log` | `adifFilePath` | Load an ADIF log file to identify already-worked DXCC entities |
-| `dx_hunter_start` | — | Start monitoring DX spots for unworked DXCC entities |
+| `dx_hunter_start` | `band?`, `mode?`, `autoTune?` | Start monitoring DX spots for unworked DXCC entities (optionally limited by band/mode and with optional auto-tuning) |
 | `dx_hunter_stop` | — | Stop DX spot monitoring |
 | `dx_hunter_status` | — | Get hunter status: running state, entities worked, needs count, last scan time |
-| `dx_hunter_needs` | `band?`, `mode?` | List unworked DXCC entities currently spotted, optionally filtered by band/mode |
+| `dx_hunter_needs` | — | List unworked DXCC entities currently spotted |
 | `dx_hunter_tune_next` | — | QSY to the highest-priority unworked DXCC spot |
-| `dx_hunter_mark_worked` | `callsign`, `band`, `mode` | Mark a DXCC entity as worked (by callsign, band, and mode) |
+| `dx_hunter_mark_worked` | `callsign`, `band?`, `mode?` | Mark a DXCC entity as worked (by callsign, with optional band and mode) |
 | `dx_hunter_lookup` | `callsign` | Look up the DXCC entity for a callsign |
 
 ---

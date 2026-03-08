@@ -185,9 +185,23 @@ public class AudioPipeline : IDisposable
             {
                 if (_recordPcm16.Count >= MaxRecordingSamples)
                 {
-                    // Auto-stop to prevent unbounded memory growth
+                    // Auto-stop to prevent unbounded memory growth — snapshot first, then reset state
                     Console.Error.WriteLine("[AUDIO] Recording buffer limit reached, auto-stopping.");
-                    _isRecording = false;
+                    var snapshot = CreateRecordingSnapshot();
+                    ResetRecordingState();
+                    // Persist outside the lock to avoid holding it during I/O
+                    _ = Task.Run(() =>
+                    {
+                        try
+                        {
+                            var info = PersistRecording(snapshot);
+                            LastRecordingInfo = info;
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.Error.WriteLine($"[AUDIO] Failed to save auto-stopped recording: {ex.Message}");
+                        }
+                    });
                 }
                 else
                 {

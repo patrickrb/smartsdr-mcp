@@ -137,7 +137,7 @@ public class RadioManager : IDisposable
         if (slice == null) return false;
         if (!ValidModes.Contains(mode))
             return false;
-        slice.DemodMode = mode.ToUpper();
+        slice.DemodMode = mode.ToUpperInvariant();
         return true;
     }
 
