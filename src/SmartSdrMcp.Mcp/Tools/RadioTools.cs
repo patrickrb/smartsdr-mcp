@@ -168,6 +168,29 @@ public class RadioTools
         return ok ? $"Mode set to {mode.ToUpper()}" : "Failed to set mode.";
     }
 
+    [McpServerTool, Description("Get the current receiver passband filter bounds (low/high Hz) for the active slice.")]
+    public string GetFilter()
+    {
+        if (!_radioManager.IsConnected)
+            return "Not connected to a radio.";
+
+        var filter = _radioManager.GetFilter();
+        if (filter == null)
+            return "No active slice.";
+
+        return JsonSerializer.Serialize(new { FilterLow = filter.Value.Low, FilterHigh = filter.Value.High }, new JsonSerializerOptions { WriteIndented = true });
+    }
+
+    [McpServerTool, Description("Set the receiver passband filter bounds in Hz. Example: low=200, high=1000 for narrow CW.")]
+    public string SetFilter(int low, int high)
+    {
+        if (!_radioManager.IsConnected)
+            return "Not connected to a radio.";
+
+        bool ok = _radioManager.SetFilter(low, high);
+        return ok ? $"Filter set to {low}-{high} Hz" : "No active slice.";
+    }
+
     [McpServerTool, Description("Get real-time meter readings from the radio including S-meter, SWR, forward/reflected power, PA temperature, voltage, mic level, ALC, and compression. Values update continuously while connected.")]
     public string GetMeters()
     {
@@ -178,11 +201,62 @@ public class RadioTools
         return JsonSerializer.Serialize(meters, new JsonSerializerOptions { WriteIndented = true });
     }
 
+    [McpServerTool, Description("Set RIT (Receiver Incremental Tuning). Enable/disable and set offset in Hz.")]
+    public string SetRit(bool? enabled = null, int? offsetHz = null)
+    {
+        if (!_radioManager.IsConnected)
+            return "Not connected to a radio.";
+        bool ok = _radioManager.SetRit(enabled, offsetHz);
+        return ok ? $"RIT set: enabled={enabled?.ToString() ?? "unchanged"}, offset={offsetHz?.ToString() ?? "unchanged"} Hz" : "No active slice.";
+    }
+
+    [McpServerTool, Description("Set XIT (Transmitter Incremental Tuning). Enable/disable and set offset in Hz.")]
+    public string SetXit(bool? enabled = null, int? offsetHz = null)
+    {
+        if (!_radioManager.IsConnected)
+            return "Not connected to a radio.";
+        bool ok = _radioManager.SetXit(enabled, offsetHz);
+        return ok ? $"XIT set: enabled={enabled?.ToString() ?? "unchanged"}, offset={offsetHz?.ToString() ?? "unchanged"} Hz" : "No active slice.";
+    }
+
+    [McpServerTool, Description("List all receiver slices with their configuration: frequency, mode, filter, antenna, AGC, noise reduction, and more.")]
+    public string ListSlices()
+    {
+        if (!_radioManager.IsConnected)
+            return "Not connected to a radio.";
+
+        var slices = _radioManager.ListSlices();
+        if (slices.Count == 0)
+            return "No slices available.";
+
+        return JsonSerializer.Serialize(slices, new JsonSerializerOptions { WriteIndented = true });
+    }
+
     [McpServerTool, Description("Set CW profile values in one operation. All params optional: wpm, pitch, breakIn, iambic.")]
     public string SetCwProfile(int? wpm = null, int? pitch = null, bool? breakIn = null, string? iambic = null)
     {
         var (success, message) = _radioManager.SetCwProfile(wpm, pitch, breakIn, iambic);
         return success ? message : $"Failed: {message}";
+    }
+
+    [McpServerTool, Description("Get noise reduction settings (NR, NB, ANF, WNB) for the active slice.")]
+    public string GetNoiseReduction()
+    {
+        if (!_radioManager.IsConnected)
+            return "Not connected to a radio.";
+
+        var nr = _radioManager.GetNoiseReduction();
+        return nr == null ? "No active slice." : JsonSerializer.Serialize(nr, new JsonSerializerOptions { WriteIndented = true });
+    }
+
+    [McpServerTool, Description("Set noise reduction on the active slice. All params optional: nrOn, nrLevel, nbOn, nbLevel, anfOn, anfLevel, wnbOn, wnbLevel.")]
+    public string SetNoiseReduction(bool? nrOn = null, int? nrLevel = null, bool? nbOn = null, int? nbLevel = null, bool? anfOn = null, int? anfLevel = null, bool? wnbOn = null, int? wnbLevel = null)
+    {
+        if (!_radioManager.IsConnected)
+            return "Not connected to a radio.";
+
+        bool ok = _radioManager.SetNoiseReduction(nrOn, nrLevel, nbOn, nbLevel, anfOn, anfLevel, wnbOn, wnbLevel);
+        return ok ? "Noise reduction settings updated." : "No active slice.";
     }
 
     private static DateTime? MaxTimestamp(DateTime? a, DateTime? b)
