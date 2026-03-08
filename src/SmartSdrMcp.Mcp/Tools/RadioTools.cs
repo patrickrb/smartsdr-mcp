@@ -407,11 +407,11 @@ public class RadioTools
         return tx == null ? "TX state unavailable." : JsonSerializer.Serialize(tx, new JsonSerializerOptions { WriteIndented = true });
     }
 
-    [McpServerTool, Description("Set TX controls: mox (PTT on/off), txTune (tune carrier), txMonitor (monitor TX audio), txInhibit (safety lockout). All optional.")]
-    public string SetTx(bool? mox = null, bool? txTune = null, bool? txMonitor = null, bool? txInhibit = null)
+    [McpServerTool, Description("Set TX controls: txMonitor (monitor TX audio), txInhibit (safety lockout). Use guarded transmit controls (cw_send_text, contest_voice_test) for RF transmission. MOX and TX tune are read-only here for safety.")]
+    public string SetTx(bool? txMonitor = null, bool? txInhibit = null)
     {
         if (!_radioManager.IsConnected) return "Not connected to a radio.";
-        bool ok = _radioManager.SetTx(mox, txTune, txMonitor, txInhibit);
+        bool ok = _radioManager.SetTx(null, null, txMonitor, txInhibit);
         return ok ? "TX settings updated." : "Failed to update TX settings.";
     }
 

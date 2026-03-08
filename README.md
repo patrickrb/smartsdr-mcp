@@ -42,7 +42,7 @@ The design keeps humans in the loop: no RF is ever emitted without explicit appr
 - Select RX and TX antennas per slice
 - Control per-slice audio: gain, pan, mute
 - Direct TX control: PTT (MOX), tune carrier, TX monitor, TX inhibit
-- 10-band TX/RX audio equalizer (63Hz–8kHz)
+- 8-band TX/RX audio equalizer (63Hz–8kHz)
 - Microphone settings: level, boost, bias, input source
 - TX audio processing: compander and speech processor
 - VOX (Voice-Operated Transmit): enable, level, delay
@@ -232,7 +232,7 @@ Or, if you prefer to run the compiled binary:
 | `get_slice_audio` | — | Get audio gain, pan, and mute for the active slice |
 | `set_slice_audio` | `audioGain?`, `audioPan?`, `mute?` | Set slice audio gain (0-100), pan (0-100), mute |
 | `get_tx_state` | — | Get TX state: MOX, TX tune, TX monitor, TX inhibit |
-| `set_tx` | `mox?`, `txTune?`, `txMonitor?`, `txInhibit?` | Control PTT, tune carrier, monitor, safety inhibit |
+| `set_tx` | `txMonitor?`, `txInhibit?` | Set TX monitor and safety inhibit (MOX/tune via guarded TX controls) |
 | `get_equalizer` | `select` | Get TX or RX equalizer settings and band levels |
 | `set_equalizer` | `select`, `enabled?`, `hz63?`–`hz8000?` | Set equalizer bands (dB) for TX or RX |
 | `get_mic` | — | Get mic level, boost, bias, input source |
