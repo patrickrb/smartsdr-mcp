@@ -530,6 +530,272 @@ public class RadioManager : IDisposable
         return true;
     }
 
+    // --- Antenna (#22) ---
+
+    public object? GetAntenna()
+    {
+        var slice = GetActiveSlice();
+        if (slice == null) return null;
+        return new
+        {
+            slice.RXAnt,
+            slice.TXAnt,
+            slice.RXAntList,
+            slice.TXAntList
+        };
+    }
+
+    public bool SetAntenna(string? rxAnt, string? txAnt)
+    {
+        var slice = GetActiveSlice();
+        if (slice == null) return false;
+        if (rxAnt != null) slice.RXAnt = rxAnt;
+        if (txAnt != null) slice.TXAnt = txAnt;
+        return true;
+    }
+
+    // --- Slice Audio (#23) ---
+
+    public object? GetSliceAudio()
+    {
+        var slice = GetActiveSlice();
+        if (slice == null) return null;
+        return new
+        {
+            slice.AudioGain,
+            slice.AudioPan,
+            slice.Mute
+        };
+    }
+
+    public bool SetSliceAudio(int? audioGain, int? audioPan, bool? mute)
+    {
+        var slice = GetActiveSlice();
+        if (slice == null) return false;
+        if (audioGain.HasValue) slice.AudioGain = audioGain.Value;
+        if (audioPan.HasValue) slice.AudioPan = audioPan.Value;
+        if (mute.HasValue) slice.Mute = mute.Value;
+        return true;
+    }
+
+    // --- TX Control (#24) ---
+
+    public object? GetTxState()
+    {
+        var radio = _radio;
+        if (radio == null || !radio.Connected) return null;
+        return new
+        {
+            radio.Mox,
+            radio.TXTune,
+            radio.TXMonitor,
+            radio.TXInhibit
+        };
+    }
+
+    public bool SetTx(bool? mox, bool? txTune, bool? txMonitor, bool? txInhibit)
+    {
+        var radio = _radio;
+        if (radio == null || !radio.Connected) return false;
+        if (mox.HasValue) radio.Mox = mox.Value;
+        if (txTune.HasValue) radio.TXTune = txTune.Value;
+        if (txMonitor.HasValue) radio.TXMonitor = txMonitor.Value;
+        if (txInhibit.HasValue) radio.TXInhibit = txInhibit.Value;
+        return true;
+    }
+
+    // --- Equalizer (#25) ---
+
+    public object? GetEqualizer(string select)
+    {
+        var radio = _radio;
+        if (radio == null || !radio.Connected) return null;
+        if (!Enum.TryParse<EqualizerSelect>(select, true, out var eqSelect) || eqSelect == EqualizerSelect.None)
+            return null;
+
+        var eq = radio.FindEqualizerByEQSelect(eqSelect);
+        if (eq == null)
+        {
+            eq = radio.CreateEqualizer(eqSelect);
+            if (eq == null) return null;
+        }
+
+        return new
+        {
+            Select = eq.EQ_select.ToString(),
+            eq.EQ_enabled,
+            eq.level_63Hz,
+            eq.level_125Hz,
+            eq.level_250Hz,
+            eq.level_500Hz,
+            eq.level_1000Hz,
+            eq.level_2000Hz,
+            eq.level_4000Hz,
+            eq.level_8000Hz
+        };
+    }
+
+    public bool SetEqualizer(string select, bool? enabled, int? hz63, int? hz125, int? hz250, int? hz500, int? hz1000, int? hz2000, int? hz4000, int? hz8000)
+    {
+        var radio = _radio;
+        if (radio == null || !radio.Connected) return false;
+        if (!Enum.TryParse<EqualizerSelect>(select, true, out var eqSelect) || eqSelect == EqualizerSelect.None)
+            return false;
+
+        var eq = radio.FindEqualizerByEQSelect(eqSelect);
+        if (eq == null)
+        {
+            eq = radio.CreateEqualizer(eqSelect);
+            if (eq == null) return false;
+        }
+
+        if (enabled.HasValue) eq.EQ_enabled = enabled.Value;
+        if (hz63.HasValue) eq.level_63Hz = hz63.Value;
+        if (hz125.HasValue) eq.level_125Hz = hz125.Value;
+        if (hz250.HasValue) eq.level_250Hz = hz250.Value;
+        if (hz500.HasValue) eq.level_500Hz = hz500.Value;
+        if (hz1000.HasValue) eq.level_1000Hz = hz1000.Value;
+        if (hz2000.HasValue) eq.level_2000Hz = hz2000.Value;
+        if (hz4000.HasValue) eq.level_4000Hz = hz4000.Value;
+        if (hz8000.HasValue) eq.level_8000Hz = hz8000.Value;
+        return true;
+    }
+
+    // --- Mic/TX Audio (#26) ---
+
+    public object? GetMic()
+    {
+        var radio = _radio;
+        if (radio == null || !radio.Connected) return null;
+        return new
+        {
+            radio.MicLevel,
+            radio.MicBoost,
+            radio.MicBias,
+            radio.MicInput,
+            radio.MicInputList
+        };
+    }
+
+    public bool SetMic(int? micLevel, bool? micBoost, bool? micBias, string? micInput)
+    {
+        var radio = _radio;
+        if (radio == null || !radio.Connected) return false;
+        if (micLevel.HasValue) radio.MicLevel = micLevel.Value;
+        if (micBoost.HasValue) radio.MicBoost = micBoost.Value;
+        if (micBias.HasValue) radio.MicBias = micBias.Value;
+        if (micInput != null) radio.MicInput = micInput;
+        return true;
+    }
+
+    public object? GetTxAudioProcessing()
+    {
+        var radio = _radio;
+        if (radio == null || !radio.Connected) return null;
+        return new
+        {
+            radio.CompanderOn,
+            radio.CompanderLevel,
+            radio.SpeechProcessorEnable,
+            radio.SpeechProcessorLevel
+        };
+    }
+
+    public bool SetTxAudioProcessing(bool? companderOn, int? companderLevel, bool? speechProcessorEnable, uint? speechProcessorLevel)
+    {
+        var radio = _radio;
+        if (radio == null || !radio.Connected) return false;
+        if (companderOn.HasValue) radio.CompanderOn = companderOn.Value;
+        if (companderLevel.HasValue) radio.CompanderLevel = companderLevel.Value;
+        if (speechProcessorEnable.HasValue) radio.SpeechProcessorEnable = speechProcessorEnable.Value;
+        if (speechProcessorLevel.HasValue) radio.SpeechProcessorLevel = speechProcessorLevel.Value;
+        return true;
+    }
+
+    // --- VOX (#27) ---
+
+    public object? GetVox()
+    {
+        var radio = _radio;
+        if (radio == null || !radio.Connected) return null;
+        return new
+        {
+            radio.SimpleVOXEnable,
+            radio.SimpleVOXLevel,
+            radio.SimpleVOXDelay
+        };
+    }
+
+    public bool SetVox(bool? enabled, int? level, int? delay)
+    {
+        var radio = _radio;
+        if (radio == null || !radio.Connected) return false;
+        if (enabled.HasValue) radio.SimpleVOXEnable = enabled.Value;
+        if (level.HasValue) radio.SimpleVOXLevel = level.Value;
+        if (delay.HasValue) radio.SimpleVOXDelay = delay.Value;
+        return true;
+    }
+
+    // --- Panadapter (#28) ---
+
+    public List<object> ListPanadapters()
+    {
+        var radio = _radio;
+        if (radio == null || !radio.Connected) return [];
+        return radio.PanadapterList.Select(p => (object)new
+        {
+            StreamID = p.StreamID.ToString("X"),
+            p.CenterFreq,
+            p.Bandwidth,
+            p.MinBandwidth,
+            p.MaxBandwidth,
+            p.LowDbm,
+            p.HighDbm,
+            p.FPS,
+            p.Average,
+            p.WeightedAverage,
+            p.Band,
+            p.RXAnt
+        }).ToList();
+    }
+
+    public bool SetPanadapter(string streamIdHex, double? centerFreq, double? bandwidth, double? lowDbm, double? highDbm, int? fps, int? average)
+    {
+        var radio = _radio;
+        if (radio == null || !radio.Connected) return false;
+        if (!uint.TryParse(streamIdHex, System.Globalization.NumberStyles.HexNumber, null, out var streamId))
+            return false;
+
+        var pan = radio.PanadapterList.FirstOrDefault(p => p.StreamID == streamId);
+        if (pan == null) return false;
+
+        if (centerFreq.HasValue) pan.CenterFreq = centerFreq.Value;
+        if (bandwidth.HasValue) pan.Bandwidth = bandwidth.Value;
+        if (lowDbm.HasValue) pan.LowDbm = lowDbm.Value;
+        if (highDbm.HasValue) pan.HighDbm = highDbm.Value;
+        if (fps.HasValue) pan.FPS = fps.Value;
+        if (average.HasValue) pan.Average = average.Value;
+        return true;
+    }
+
+    // --- Tune to Spot (#29) ---
+
+    public (bool Success, string Message) TuneToSpot(string callsign)
+    {
+        var radio = _radio;
+        if (radio == null || !radio.Connected) return (false, "Radio not connected");
+
+        var spot = radio.SpotsList.FirstOrDefault(s =>
+            string.Equals(s.Callsign, callsign, StringComparison.OrdinalIgnoreCase));
+        if (spot == null) return (false, $"Spot for {callsign} not found");
+
+        var slice = GetActiveSlice();
+        if (slice == null) return (false, "No active slice");
+
+        slice.Freq = spot.RXFrequency;
+        return (true, $"Tuned to {callsign} at {spot.RXFrequency:F6} MHz");
+    }
+
     public Dictionary<string, object> GetMeters()
     {
         var radio = _radio;

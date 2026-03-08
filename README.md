@@ -39,6 +39,15 @@ The design keeps humans in the loop: no RF is ever emitted without explicit appr
 - Save, load, and delete memory channels
 - View and manage DX spots
 - Read GPS/GNSS data: grid square, coordinates, altitude, satellites
+- Select RX and TX antennas per slice
+- Control per-slice audio: gain, pan, mute
+- Direct TX control: PTT (MOX), tune carrier, TX monitor, TX inhibit
+- 8-band TX/RX audio equalizer (63Hz–8kHz)
+- Microphone settings: level, boost, bias, input source
+- TX audio processing: compander and speech processor
+- VOX (Voice-Operated Transmit): enable, level, delay
+- Panadapter control: center frequency, bandwidth, dBm range, FPS
+- Tune to DX spot by callsign
 
 ### CW (Morse Code) Decoding
 - Captures audio via the FlexRadio DAX (Digital Audio eXchange) interface
@@ -218,6 +227,23 @@ Or, if you prefer to run the compiled binary:
 | `remove_spot` | `callsign` | Remove a DX spot by callsign |
 | `get_agc` | — | Get AGC settings (mode, threshold, off-level) |
 | `set_agc` | `mode?`, `threshold?`, `offLevel?` | Set AGC mode (off/slow/medium/fast) and threshold |
+| `get_antenna` | — | Get current RX/TX antenna and available antenna lists |
+| `set_antenna` | `rxAnt?`, `txAnt?` | Set RX and/or TX antenna for the active slice |
+| `get_slice_audio` | — | Get audio gain, pan, and mute for the active slice |
+| `set_slice_audio` | `audioGain?`, `audioPan?`, `mute?` | Set slice audio gain (0-100), pan (0-100), mute |
+| `get_tx_state` | — | Get TX state: MOX, TX tune, TX monitor, TX inhibit |
+| `set_tx` | `txMonitor?`, `txInhibit?` | Set TX monitor and safety inhibit (MOX/tune via guarded TX controls) |
+| `get_equalizer` | `select` | Get TX or RX equalizer settings and band levels |
+| `set_equalizer` | `select`, `enabled?`, `hz63?`–`hz8000?` | Set equalizer bands (dB) for TX or RX |
+| `get_mic` | — | Get mic level, boost, bias, input source |
+| `set_mic` | `micLevel?`, `micBoost?`, `micBias?`, `micInput?` | Set microphone settings |
+| `get_tx_audio_processing` | — | Get compander and speech processor settings |
+| `set_tx_audio_processing` | `companderOn?`, `companderLevel?`, `speechProcessorEnable?`, `speechProcessorLevel?` | Set TX audio processing |
+| `get_vox` | — | Get VOX settings: enabled, level, delay |
+| `set_vox` | `enabled?`, `level?`, `delay?` | Set VOX enabled, level, and delay |
+| `list_panadapters` | — | List all panadapters with center freq, bandwidth, dBm range |
+| `set_panadapter` | `streamId`, `centerFreq?`, `bandwidth?`, `lowDbm?`, `highDbm?`, `fps?`, `average?` | Set panadapter display settings |
+| `tune_to_spot` | `callsign` | Tune active slice to a DX spot's frequency |
 
 ### CW Listener Tools
 
