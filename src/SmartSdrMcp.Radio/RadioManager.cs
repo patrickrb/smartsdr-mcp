@@ -227,6 +227,38 @@ public class RadioManager : IDisposable
         return false;
     }
 
+    public List<object> ListSlices()
+    {
+        var radio = _radio;
+        if (radio == null || !radio.Connected) return [];
+
+        return radio.SliceList.Select(s => (object)new
+        {
+            s.Index,
+            s.Letter,
+            s.Active,
+            FrequencyMHz = s.Freq,
+            Mode = s.DemodMode,
+            s.FilterLow,
+            s.FilterHigh,
+            s.DAXChannel,
+            s.RXAnt,
+            s.TXAnt,
+            s.AGCMode,
+            s.AudioGain,
+            s.AudioPan,
+            s.Mute,
+            s.NROn,
+            s.NBOn,
+            s.ANFOn,
+            s.IsTransmitSlice,
+            s.RITOn,
+            s.RITFreq,
+            s.XITOn,
+            s.XITFreq
+        }).ToList();
+    }
+
     public Dictionary<string, object> GetMeters()
     {
         var radio = _radio;

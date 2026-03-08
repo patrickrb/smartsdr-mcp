@@ -178,6 +178,19 @@ public class RadioTools
         return JsonSerializer.Serialize(meters, new JsonSerializerOptions { WriteIndented = true });
     }
 
+    [McpServerTool, Description("List all receiver slices with their configuration: frequency, mode, filter, antenna, AGC, noise reduction, and more.")]
+    public string ListSlices()
+    {
+        if (!_radioManager.IsConnected)
+            return "Not connected to a radio.";
+
+        var slices = _radioManager.ListSlices();
+        if (slices.Count == 0)
+            return "No slices available.";
+
+        return JsonSerializer.Serialize(slices, new JsonSerializerOptions { WriteIndented = true });
+    }
+
     [McpServerTool, Description("Set CW profile values in one operation. All params optional: wpm, pitch, breakIn, iambic.")]
     public string SetCwProfile(int? wpm = null, int? pitch = null, bool? breakIn = null, string? iambic = null)
     {
