@@ -232,6 +232,141 @@ public class RadioTools
         return JsonSerializer.Serialize(slices, new JsonSerializerOptions { WriteIndented = true });
     }
 
+    [McpServerTool, Description("Get GPS/GNSS data from the radio: latitude, longitude, grid square, altitude, satellites, speed, frequency error.")]
+    public string GetGps()
+    {
+        if (!_radioManager.IsConnected)
+            return "Not connected to a radio.";
+        var gps = _radioManager.GetGps();
+        return gps == null ? "GPS data unavailable." : JsonSerializer.Serialize(gps, new JsonSerializerOptions { WriteIndented = true });
+    }
+
+    [McpServerTool, Description("List all active Tracking Notch Filters (TNFs) with frequency, depth, bandwidth, and permanent flag.")]
+    public string ListTnfs()
+    {
+        if (!_radioManager.IsConnected)
+            return "Not connected to a radio.";
+        var tnfs = _radioManager.ListTnfs();
+        return tnfs.Count == 0 ? "No TNFs active." : JsonSerializer.Serialize(tnfs, new JsonSerializerOptions { WriteIndented = true });
+    }
+
+    [McpServerTool, Description("Add a Tracking Notch Filter at the specified frequency in MHz to null out interference.")]
+    public string AddTnf(double frequencyMHz)
+    {
+        if (!_radioManager.IsConnected)
+            return "Not connected to a radio.";
+        bool ok = _radioManager.AddTnf(frequencyMHz);
+        return ok ? $"TNF added at {frequencyMHz:F6} MHz" : "Failed to add TNF.";
+    }
+
+    [McpServerTool, Description("Remove a Tracking Notch Filter by its ID.")]
+    public string RemoveTnf(uint tnfId)
+    {
+        if (!_radioManager.IsConnected)
+            return "Not connected to a radio.";
+        bool ok = _radioManager.RemoveTnf(tnfId);
+        return ok ? $"TNF {tnfId} removed." : $"TNF {tnfId} not found.";
+    }
+
+    [McpServerTool, Description("Get current RF power settings: transmit power, tune power, and max power level.")]
+    public string GetRfPower()
+    {
+        if (!_radioManager.IsConnected)
+            return "Not connected to a radio.";
+        var power = _radioManager.GetRfPower();
+        return power == null ? "Power data unavailable." : JsonSerializer.Serialize(power, new JsonSerializerOptions { WriteIndented = true });
+    }
+
+    [McpServerTool, Description("Set RF transmit power (0-100) and/or tune power. Example: rfPower=50 for 50W.")]
+    public string SetRfPower(int? rfPower = null, int? tunePower = null)
+    {
+        if (!_radioManager.IsConnected)
+            return "Not connected to a radio.";
+        bool ok = _radioManager.SetRfPower(rfPower, tunePower);
+        return ok ? $"Power set: rfPower={rfPower?.ToString() ?? "unchanged"}, tunePower={tunePower?.ToString() ?? "unchanged"}" : "Failed to set power.";
+    }
+
+    [McpServerTool, Description("Get antenna tuner (ATU) status: present, enabled, tuning, bypass, using memory.")]
+    public string GetAtuStatus()
+    {
+        if (!_radioManager.IsConnected)
+            return "Not connected to a radio.";
+        var status = _radioManager.GetAtuStatus();
+        return status == null ? "ATU status unavailable." : JsonSerializer.Serialize(status, new JsonSerializerOptions { WriteIndented = true });
+    }
+
+    [McpServerTool, Description("Initiate antenna tuner (ATU) auto-tune cycle.")]
+    public string AtuTune()
+    {
+        if (!_radioManager.IsConnected)
+            return "Not connected to a radio.";
+        var (success, message) = _radioManager.AtuTune();
+        return message;
+    }
+
+    [McpServerTool, Description("List all saved memory channels with name, frequency, mode, and group.")]
+    public string ListMemories()
+    {
+        if (!_radioManager.IsConnected)
+            return "Not connected to a radio.";
+        var memories = _radioManager.ListMemories();
+        return memories.Count == 0 ? "No memories saved." : JsonSerializer.Serialize(memories, new JsonSerializerOptions { WriteIndented = true });
+    }
+
+    [McpServerTool, Description("Load (recall) a saved memory channel by index, tuning the radio to that frequency and mode.")]
+    public string LoadMemory(int index)
+    {
+        if (!_radioManager.IsConnected)
+            return "Not connected to a radio.";
+        bool ok = _radioManager.LoadMemory(index);
+        return ok ? $"Memory {index} loaded." : $"Memory {index} not found.";
+    }
+
+    [McpServerTool, Description("Delete a saved memory channel by index.")]
+    public string DeleteMemory(int index)
+    {
+        if (!_radioManager.IsConnected)
+            return "Not connected to a radio.";
+        bool ok = _radioManager.DeleteMemory(index);
+        return ok ? $"Memory {index} deleted." : $"Memory {index} not found.";
+    }
+
+    [McpServerTool, Description("List all DX spots on the radio with callsign, frequency, mode, spotter, comment, and timestamp.")]
+    public string ListSpots()
+    {
+        if (!_radioManager.IsConnected)
+            return "Not connected to a radio.";
+        var spots = _radioManager.ListSpots();
+        return spots.Count == 0 ? "No spots available." : JsonSerializer.Serialize(spots, new JsonSerializerOptions { WriteIndented = true });
+    }
+
+    [McpServerTool, Description("Remove a DX spot by callsign.")]
+    public string RemoveSpot(string callsign)
+    {
+        if (!_radioManager.IsConnected)
+            return "Not connected to a radio.";
+        bool ok = _radioManager.RemoveSpot(callsign);
+        return ok ? $"Spot for {callsign} removed." : $"Spot for {callsign} not found.";
+    }
+
+    [McpServerTool, Description("Get AGC (Automatic Gain Control) settings for the active slice: mode (off/slow/medium/fast), threshold, off-level.")]
+    public string GetAgc()
+    {
+        if (!_radioManager.IsConnected)
+            return "Not connected to a radio.";
+        var agc = _radioManager.GetAgc();
+        return agc == null ? "No active slice." : JsonSerializer.Serialize(agc, new JsonSerializerOptions { WriteIndented = true });
+    }
+
+    [McpServerTool, Description("Set AGC mode (off, slow, medium, fast), threshold, and/or off-level for the active slice.")]
+    public string SetAgc(string? mode = null, int? threshold = null, int? offLevel = null)
+    {
+        if (!_radioManager.IsConnected)
+            return "Not connected to a radio.";
+        bool ok = _radioManager.SetAgc(mode, threshold, offLevel);
+        return ok ? "AGC settings updated." : "No active slice.";
+    }
+
     [McpServerTool, Description("Set CW profile values in one operation. All params optional: wpm, pitch, breakIn, iambic.")]
     public string SetCwProfile(int? wpm = null, int? pitch = null, bool? breakIn = null, string? iambic = null)
     {

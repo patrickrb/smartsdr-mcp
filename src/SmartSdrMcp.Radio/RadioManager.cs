@@ -320,6 +320,216 @@ public class RadioManager : IDisposable
         };
     }
 
+    // --- GPS (#9) ---
+
+    public object? GetGps()
+    {
+        var radio = _radio;
+        if (radio == null || !radio.Connected) return null;
+        return new
+        {
+            radio.GPSInstalled,
+            radio.GPSLatitude,
+            radio.GPSLongitude,
+            radio.GPSGrid,
+            radio.GPSAltitude,
+            radio.GPSSatellitesTracked,
+            radio.GPSSatellitesVisible,
+            radio.GPSSpeed,
+            radio.GPSFreqError,
+            radio.GPSStatus
+        };
+    }
+
+    // --- TNF (#10) ---
+
+    public List<object> ListTnfs()
+    {
+        var radio = _radio;
+        if (radio == null || !radio.Connected) return [];
+        return radio.TNFList.Select(t => (object)new
+        {
+            t.ID,
+            FrequencyMHz = t.Frequency,
+            t.Depth,
+            BandwidthHz = (int)(t.Bandwidth * 1e6),
+            t.Permanent
+        }).ToList();
+    }
+
+    public bool AddTnf(double frequencyMHz)
+    {
+        var radio = _radio;
+        if (radio == null || !radio.Connected) return false;
+        // RequestTNF with panID 0 uses frequency directly when freq != 0
+        radio.RequestTNF(frequencyMHz, 0);
+        return true;
+    }
+
+    public bool RemoveTnf(uint tnfId)
+    {
+        var radio = _radio;
+        if (radio == null || !radio.Connected) return false;
+        var tnf = radio.TNFList.FirstOrDefault(t => t.ID == tnfId);
+        if (tnf == null) return false;
+        tnf.Close();
+        return true;
+    }
+
+    // --- RF Power (#11) ---
+
+    public object? GetRfPower()
+    {
+        var radio = _radio;
+        if (radio == null || !radio.Connected) return null;
+        return new
+        {
+            radio.RFPower,
+            radio.TunePower,
+            radio.MaxPowerLevel
+        };
+    }
+
+    public bool SetRfPower(int? rfPower, int? tunePower)
+    {
+        var radio = _radio;
+        if (radio == null || !radio.Connected) return false;
+        if (rfPower.HasValue) radio.RFPower = rfPower.Value;
+        if (tunePower.HasValue) radio.TunePower = tunePower.Value;
+        return true;
+    }
+
+    // --- ATU (#12) ---
+
+    public object? GetAtuStatus()
+    {
+        var radio = _radio;
+        if (radio == null || !radio.Connected) return null;
+
+        var tuner = radio.TunerList.FirstOrDefault();
+        return new
+        {
+            radio.ATUPresent,
+            radio.ATUEnabled,
+            radio.ATUMemoriesEnabled,
+            radio.ATUUsingMemory,
+            IsTuning = tuner?.IsTuning ?? false,
+            IsBypass = tuner?.IsBypass ?? false
+        };
+    }
+
+    public (bool Success, string Message) AtuTune()
+    {
+        var radio = _radio;
+        if (radio == null || !radio.Connected) return (false, "Radio not connected");
+        if (!radio.ATUPresent) return (false, "No ATU present");
+
+        var tuner = radio.TunerList.FirstOrDefault();
+        if (tuner == null) return (false, "No tuner found");
+
+        tuner.AutoTune();
+        return (true, "ATU tune initiated");
+    }
+
+    // --- Memories (#13) ---
+
+    public List<object> ListMemories()
+    {
+        var radio = _radio;
+        if (radio == null || !radio.Connected) return [];
+        return radio.MemoryList.Select(m => (object)new
+        {
+            m.Index,
+            m.Name,
+            m.Group,
+            FrequencyMHz = m.Freq,
+            m.Mode
+        }).ToList();
+    }
+
+    public bool LoadMemory(int index)
+    {
+        var radio = _radio;
+        if (radio == null || !radio.Connected) return false;
+        var mem = radio.MemoryList.FirstOrDefault(m => m.Index == index);
+        if (mem == null) return false;
+        mem.Select();
+        return true;
+    }
+
+    public bool DeleteMemory(int index)
+    {
+        var radio = _radio;
+        if (radio == null || !radio.Connected) return false;
+        var mem = radio.MemoryList.FirstOrDefault(m => m.Index == index);
+        if (mem == null) return false;
+        mem.Remove();
+        return true;
+    }
+
+    // --- DX Spots (#14) ---
+
+    public List<object> ListSpots()
+    {
+        var radio = _radio;
+        if (radio == null || !radio.Connected) return [];
+        return radio.SpotsList.Select(s => (object)new
+        {
+            s.Callsign,
+            s.SpotterCallsign,
+            FrequencyMHz = s.RXFrequency,
+            s.Mode,
+            s.Source,
+            s.Comment,
+            s.Timestamp
+        }).ToList();
+    }
+
+    public bool RemoveSpot(string callsign)
+    {
+        var radio = _radio;
+        if (radio == null || !radio.Connected) return false;
+        var spot = radio.SpotsList.FirstOrDefault(s =>
+            string.Equals(s.Callsign, callsign, StringComparison.OrdinalIgnoreCase));
+        if (spot == null) return false;
+        spot.Remove();
+        return true;
+    }
+
+    // --- AGC (#15) ---
+
+    public object? GetAgc()
+    {
+        var slice = GetActiveSlice();
+        if (slice == null) return null;
+        return new
+        {
+            Mode = slice.AGCMode.ToString(),
+            slice.AGCThreshold,
+            slice.AGCOffLevel
+        };
+    }
+
+    public bool SetAgc(string? mode, int? threshold, int? offLevel)
+    {
+        var slice = GetActiveSlice();
+        if (slice == null) return false;
+        if (mode != null)
+        {
+            var normalizedMode = mode;
+            if (normalizedMode.Equals("med", StringComparison.OrdinalIgnoreCase))
+                normalizedMode = "Medium";
+
+            if (Enum.TryParse<AGCMode>(normalizedMode, true, out var agcMode))
+                slice.AGCMode = agcMode;
+            else
+                return false;
+        }
+        if (threshold.HasValue) slice.AGCThreshold = threshold.Value;
+        if (offLevel.HasValue) slice.AGCOffLevel = offLevel.Value;
+        return true;
+    }
+
     public Dictionary<string, object> GetMeters()
     {
         var radio = _radio;
