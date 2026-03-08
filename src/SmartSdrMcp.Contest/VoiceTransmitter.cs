@@ -1,5 +1,5 @@
 using System.Diagnostics;
-using System.Runtime.InteropServices;
+
 using Flex.Smoothlake.FlexLib;
 using SmartSdrMcp.Radio;
 
@@ -30,7 +30,7 @@ public class VoiceTransmitter
         int numSamples = DaxSampleRate * 2;
         var samples = new float[numSamples];
         for (int i = 0; i < numSamples; i++)
-            samples[i] = (float)(Math.Sin(2.0 * Math.PI * 1000.0 * i / DaxSampleRate) * AudioScale);
+            samples[i] = (float)Math.Sin(2.0 * Math.PI * 1000.0 * i / DaxSampleRate);
 
         return await StreamToRadio(radio, samples, "1kHz tone (2s)");
     }

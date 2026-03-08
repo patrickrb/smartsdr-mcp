@@ -24,7 +24,7 @@ public class SsbListenerTools
         _ssbPipeline = ssbPipeline;
     }
 
-    [McpServerTool, Description("Start SSB speech-to-text listener. Captures DAX audio and transcribes voice using Vosk.")]
+    [McpServerTool, Description("Start SSB speech-to-text listener. Captures DAX audio and transcribes voice using Whisper.")]
     public string SsbListenerStart(int daxChannel = 1)
     {
         if (!_radioManager.IsConnected)
@@ -35,9 +35,9 @@ public class SsbListenerTools
 
         var state = _radioManager.GetState();
 
-        bool audioStarted = _audioPipeline.Start(daxChannel);
+        var (audioStarted, audioError) = _audioPipeline.Start(daxChannel);
         if (!audioStarted)
-            return "Failed to start audio pipeline. Check DAX channel configuration.";
+            return audioError ?? "Failed to start audio pipeline. Check DAX channel configuration.";
 
         var result = _ssbPipeline.Start();
         if (result != "ok")

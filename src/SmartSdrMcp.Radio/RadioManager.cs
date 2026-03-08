@@ -139,22 +139,8 @@ public class RadioManager : IDisposable
         var target = radio.SliceList.FirstOrDefault(s => s.Index == sliceIndex);
         if (target == null) return false;
 
-        var activeProp = target.GetType().GetProperty("Active");
-        if (activeProp?.CanWrite == true)
-        {
-            activeProp.SetValue(target, true);
-            return true;
-        }
-
-        var method = target.GetType().GetMethod("RequestActive")
-                     ?? target.GetType().GetMethod("SetActive");
-        if (method != null)
-        {
-            method.Invoke(target, null);
-            return true;
-        }
-
-        return false;
+        target.Active = true;
+        return true;
     }
 
     public bool StepFrequency(int stepHz, out double newFrequencyMHz)

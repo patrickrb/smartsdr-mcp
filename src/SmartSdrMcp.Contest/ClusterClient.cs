@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net.Http;
 
 namespace SmartSdrMcp.Contest;
@@ -56,7 +57,7 @@ public class ClusterClient
             var fields = line.Split('^');
             if (fields.Length < 5) continue;
 
-            if (!double.TryParse(fields[1], out var freq)) continue;
+            if (!double.TryParse(fields[1], CultureInfo.InvariantCulture, out var freq)) continue;
 
             var call = fields[2].Trim();
             if (string.IsNullOrEmpty(call)) continue;

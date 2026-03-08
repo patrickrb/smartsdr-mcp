@@ -14,7 +14,6 @@ using SmartSdrMcp.Tx;
 
 const string MyCallsign = "K1AF";
 const string MyName = "PATRICK";
-const string MyQth = "Kansas";
 
 var builder = Host.CreateApplicationBuilder(args);
 

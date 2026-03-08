@@ -109,9 +109,11 @@ public class CwTransmitTools
     {
         if (proposalId != null)
         {
+            var proposalText = _transmitController.GetPendingProposals()
+                .FirstOrDefault(p => p.Id == proposalId)?.SuggestedText;
             var (success, message) = _transmitController.ApproveAndSend(proposalId);
-            if (success)
-                _qsoTracker.NotifySent(message);
+            if (success && proposalText != null)
+                _qsoTracker.NotifySent(proposalText);
             return message;
         }
 
@@ -157,9 +159,9 @@ public class CwTransmitTools
             return "Macro find_cq complete: CW listener already running in CW mode.";
 
         var state = _radioManager.GetState();
-        bool audioStarted = _audioPipeline.Start(daxChannel: 1);
+        var (audioStarted, audioError) = _audioPipeline.Start(daxChannel: 1);
         if (!audioStarted)
-            return "Macro find_cq failed: unable to start DAX audio on channel 1.";
+            return audioError ?? "Macro find_cq failed: unable to start DAX audio on channel 1.";
 
         _cwPipeline.Reset();
         _cwPipeline.SetToneFrequency(state.CwPitch);

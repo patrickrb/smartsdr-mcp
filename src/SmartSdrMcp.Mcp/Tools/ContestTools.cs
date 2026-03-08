@@ -56,9 +56,9 @@ public class ContestTools
         // Start SSB listener if not already running
         if (!_ssbPipeline.IsRunning)
         {
-            bool audioStarted = _audioPipeline.Start(daxChannel);
+            var (audioStarted, audioError) = _audioPipeline.Start(daxChannel);
             if (!audioStarted)
-                return "Failed to start audio pipeline. Check DAX channel configuration.";
+                return audioError ?? "Failed to start audio pipeline. Check DAX channel configuration.";
 
             var ssbResult = _ssbPipeline.Start();
             if (ssbResult != "ok")

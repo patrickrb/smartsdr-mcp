@@ -199,7 +199,10 @@ public class ContestAgent
         }
     }
 
-    public List<ContestQsoLog> GetLog() => _qsoLog.ToList();
+    public List<ContestQsoLog> GetLog()
+    {
+        lock (_lock) { return _qsoLog.ToList(); }
+    }
 
     private void AgentLoop()
     {

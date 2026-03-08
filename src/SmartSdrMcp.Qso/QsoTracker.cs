@@ -30,9 +30,8 @@ public partial class QsoTracker
             _recentMessages.Add(message);
             if (_recentMessages.Count > 100)
                 _recentMessages.RemoveRange(0, 50);
+            LastMessageAtUtc = message.Timestamp;
         }
-
-        LastMessageAtUtc = message.Timestamp;
         MessageReceived?.Invoke(message);
         UpdateState(message);
     }

@@ -20,6 +20,7 @@ public class AudioPipeline : IDisposable
     private int _consumerCount;
     private int? _currentDaxChannel;
 
+    private readonly object _startLock = new();
     private readonly object _recordLock = new();
     private bool _isRecording;
     private string _recordFormat = "wav";
@@ -44,49 +45,62 @@ public class AudioPipeline : IDisposable
         _radioManager = radioManager;
     }
 
-    public bool Start(int daxChannel = 1)
+    public (bool Success, string? Error) Start(int daxChannel = 1)
     {
-        _consumerCount++;
-
-        if (_running) return true;
-
-        var radio = _radioManager.Radio;
-        if (radio == null || !radio.Connected)
+        lock (_startLock)
         {
-            _consumerCount--;
-            return false;
-        }
+            _consumerCount++;
 
-        _currentDaxChannel = daxChannel;
-        radio.DAXRXAudioStreamAdded += OnStreamAdded;
-        radio.RequestDAXRXAudioStream(daxChannel);
-        _running = true;
-        return true;
+            if (_running)
+            {
+                if (_currentDaxChannel != daxChannel)
+                    return (false, $"Pipeline already running on DAX channel {_currentDaxChannel}. Stop first to switch channels.");
+                return (true, null);
+            }
+
+            var radio = _radioManager.Radio;
+            if (radio == null || !radio.Connected)
+            {
+                _consumerCount--;
+                return (false, null);
+            }
+
+            _currentDaxChannel = daxChannel;
+            radio.DAXRXAudioStreamAdded += OnStreamAdded;
+            radio.RequestDAXRXAudioStream(daxChannel);
+            _running = true;
+            return (true, null);
+        }
     }
 
     public void Stop()
     {
-        _consumerCount--;
-        if (_consumerCount > 0) return;
-        _consumerCount = 0;
-
-        _running = false;
-        _currentDaxChannel = null;
-        if (_audioStream != null)
+        lock (_startLock)
         {
-            _audioStream.DataReady -= OnDataReady;
-            _audioStream.Close();
-            _audioStream = null;
+            _consumerCount--;
+            if (_consumerCount > 0) return;
+            _consumerCount = 0;
+
+            _running = false;
+            _currentDaxChannel = null;
+            if (_audioStream != null)
+            {
+                _audioStream.DataReady -= OnDataReady;
+                _audioStream.Close();
+                _audioStream = null;
+            }
+
+            if (_isRecording)
+                StopRecording();
+
+            Buffer.Clear();
         }
-
-        if (_isRecording)
-            StopRecording();
-
-        Buffer.Clear();
     }
 
     public (bool Success, string Message) StartRecording(string format = "wav", int seconds = 30)
     {
+        if (seconds < 0) seconds = 0;
+
         if (!_running)
             return (false, "Audio pipeline is not running.");
 
@@ -129,9 +143,16 @@ public class AudioPipeline : IDisposable
             ResetRecordingState();
         }
 
-        var info = PersistRecording(snapshot);
-        LastRecordingInfo = info;
-        return (true, $"Recording saved to {info.Path}", info);
+        try
+        {
+            var info = PersistRecording(snapshot);
+            LastRecordingInfo = info;
+            return (true, $"Recording saved to {info.Path}", info);
+        }
+        catch (Exception ex)
+        {
+            return (false, $"Failed to save recording: {ex.Message}", null);
+        }
     }
 
     private void OnStreamAdded(DAXRXAudioStream stream)
