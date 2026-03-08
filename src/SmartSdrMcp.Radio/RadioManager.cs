@@ -136,6 +136,39 @@ public class RadioManager : IDisposable
         return true;
     }
 
+    public (int Low, int High)? GetFilter()
+    {
+        var slice = GetActiveSlice();
+        if (slice == null) return null;
+        return (slice.FilterLow, slice.FilterHigh);
+    }
+
+    public bool SetFilter(int low, int high)
+    {
+        var slice = GetActiveSlice();
+        if (slice == null) return false;
+        slice.UpdateFilter(low, high);
+        return true;
+    }
+
+    public bool SetRit(bool? enabled, int? offsetHz)
+    {
+        var slice = GetActiveSlice();
+        if (slice == null) return false;
+        if (enabled.HasValue) slice.RITOn = enabled.Value;
+        if (offsetHz.HasValue) slice.RITFreq = offsetHz.Value;
+        return true;
+    }
+
+    public bool SetXit(bool? enabled, int? offsetHz)
+    {
+        var slice = GetActiveSlice();
+        if (slice == null) return false;
+        if (enabled.HasValue) slice.XITOn = enabled.Value;
+        if (offsetHz.HasValue) slice.XITFreq = offsetHz.Value;
+        return true;
+    }
+
     public bool SetActiveSlice(int sliceIndex)
     {
         var radio = _radio;
@@ -225,6 +258,66 @@ public class RadioManager : IDisposable
         }
 
         return false;
+    }
+
+    public List<object> ListSlices()
+    {
+        var radio = _radio;
+        if (radio == null || !radio.Connected) return [];
+
+        return radio.SliceList.Select(s => (object)new
+        {
+            s.Index,
+            s.Letter,
+            s.Active,
+            FrequencyMHz = s.Freq,
+            Mode = s.DemodMode,
+            s.FilterLow,
+            s.FilterHigh,
+            s.DAXChannel,
+            s.RXAnt,
+            s.TXAnt,
+            s.AGCMode,
+            s.AudioGain,
+            s.AudioPan,
+            s.Mute,
+            s.NROn,
+            s.NBOn,
+            s.ANFOn,
+            s.IsTransmitSlice,
+            s.RITOn,
+            s.RITFreq,
+            s.XITOn,
+            s.XITFreq
+        }).ToList();
+    }
+
+    public bool SetNoiseReduction(bool? nrOn = null, int? nrLevel = null, bool? nbOn = null, int? nbLevel = null, bool? anfOn = null, int? anfLevel = null, bool? wnbOn = null, int? wnbLevel = null)
+    {
+        var slice = GetActiveSlice();
+        if (slice == null) return false;
+        if (nrOn.HasValue) slice.NROn = nrOn.Value;
+        if (nrLevel.HasValue) slice.NRLevel = nrLevel.Value;
+        if (nbOn.HasValue) slice.NBOn = nbOn.Value;
+        if (nbLevel.HasValue) slice.NBLevel = nbLevel.Value;
+        if (anfOn.HasValue) slice.ANFOn = anfOn.Value;
+        if (anfLevel.HasValue) slice.ANFLevel = anfLevel.Value;
+        if (wnbOn.HasValue) slice.WNBOn = wnbOn.Value;
+        if (wnbLevel.HasValue) slice.WNBLevel = wnbLevel.Value;
+        return true;
+    }
+
+    public object? GetNoiseReduction()
+    {
+        var slice = GetActiveSlice();
+        if (slice == null) return null;
+        return new
+        {
+            NR = new { slice.NROn, slice.NRLevel },
+            NB = new { slice.NBOn, slice.NBLevel },
+            ANF = new { slice.ANFOn, slice.ANFLevel },
+            WNB = new { slice.WNBOn, slice.WNBLevel }
+        };
     }
 
     public Dictionary<string, object> GetMeters()
