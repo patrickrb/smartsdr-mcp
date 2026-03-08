@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Flex.Smoothlake.FlexLib;
 using System.Globalization;
 
@@ -8,6 +9,7 @@ public class RadioManager : IDisposable
     private Flex.Smoothlake.FlexLib.Radio? _radio;
     private bool _initialized;
     private readonly object _lock = new();
+    private readonly ConcurrentDictionary<string, float> _meterValues = new();
 
     public event Action<Flex.Smoothlake.FlexLib.Radio>? RadioDiscovered;
     public event Action? StateChanged;
@@ -63,6 +65,9 @@ public class RadioManager : IDisposable
 
         // Subscribe to GUI client updates so we can bind once a GUI client is available
         _radio.GUIClientAdded += OnGuiClientAdded;
+
+        // Subscribe to meter events for caching
+        SubscribeMeterEvents(_radio);
 
         return _radio.Connect();
     }
@@ -220,6 +225,55 @@ public class RadioManager : IDisposable
         }
 
         return false;
+    }
+
+    public Dictionary<string, object> GetMeters()
+    {
+        var radio = _radio;
+        if (radio == null || !radio.Connected)
+            return new Dictionary<string, object> { ["error"] = "Radio not connected" };
+
+        // Also subscribe to any slice S-meter that we haven't caught yet
+        SubscribeSliceMeters(radio);
+
+        var result = new Dictionary<string, object>();
+
+        foreach (var kvp in _meterValues)
+            result[kvp.Key] = Math.Round(kvp.Value, 2);
+
+        return result;
+    }
+
+    private void SubscribeMeterEvents(Flex.Smoothlake.FlexLib.Radio radio)
+    {
+        _meterValues.Clear();
+
+        radio.ForwardPowerDataReady += data => _meterValues["FWDPWR"] = data;
+        radio.ReflectedPowerDataReady += data => _meterValues["REFPWR"] = data;
+        radio.SWRDataReady += data => _meterValues["SWR"] = data;
+        radio.PATempDataReady += data => _meterValues["PATEMP"] = data;
+        radio.VoltsDataReady += data => _meterValues["VOLTS"] = data;
+        radio.MicDataReady += data => _meterValues["MIC"] = data;
+        radio.MicPeakDataReady += data => _meterValues["MICPEAK"] = data;
+        radio.CompPeakDataReady += data => _meterValues["COMPPEAK"] = data;
+        radio.HWAlcDataReady += data => _meterValues["HWALC"] = data;
+
+        // Subscribe to S-meters on existing slices
+        SubscribeSliceMeters(radio);
+    }
+
+    private readonly HashSet<int> _subscribedSlices = [];
+
+    private void SubscribeSliceMeters(Flex.Smoothlake.FlexLib.Radio radio)
+    {
+        foreach (var slice in radio.SliceList)
+        {
+            if (_subscribedSlices.Add(slice.Index))
+            {
+                var sliceIndex = slice.Index;
+                slice.SMeterDataReady += data => _meterValues[$"S-METER_SLC{sliceIndex}"] = data;
+            }
+        }
     }
 
     private void OnRadioAdded(Flex.Smoothlake.FlexLib.Radio radio)

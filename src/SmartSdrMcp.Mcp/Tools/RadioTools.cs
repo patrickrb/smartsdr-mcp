@@ -168,6 +168,16 @@ public class RadioTools
         return ok ? $"Mode set to {mode.ToUpper()}" : "Failed to set mode.";
     }
 
+    [McpServerTool, Description("Get real-time meter readings from the radio including S-meter, SWR, forward/reflected power, PA temperature, voltage, mic level, ALC, and compression. Values update continuously while connected.")]
+    public string GetMeters()
+    {
+        if (!_radioManager.IsConnected)
+            return "Not connected to a radio.";
+
+        var meters = _radioManager.GetMeters();
+        return JsonSerializer.Serialize(meters, new JsonSerializerOptions { WriteIndented = true });
+    }
+
     [McpServerTool, Description("Set CW profile values in one operation. All params optional: wpm, pitch, breakIn, iambic.")]
     public string SetCwProfile(int? wpm = null, int? pitch = null, bool? breakIn = null, string? iambic = null)
     {
