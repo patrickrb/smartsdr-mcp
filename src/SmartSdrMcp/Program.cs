@@ -3,7 +3,9 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using SmartSdrMcp.Ai;
 using SmartSdrMcp.Audio;
+using SmartSdrMcp.BandScout;
 using SmartSdrMcp.Cw;
+using SmartSdrMcp.DxHunter;
 using SmartSdrMcp.Mcp.Resources;
 using SmartSdrMcp.Mcp.Tools;
 using SmartSdrMcp.Contest;
@@ -54,6 +56,10 @@ builder.Services.AddSingleton<ContestAgent>(sp =>
         sp.GetRequiredService<SsbPipeline>(),
         sp.GetRequiredService<RadioManager>(),
         sp.GetRequiredService<AudioPipeline>()));
+builder.Services.AddSingleton<BandScoutMonitor>(sp =>
+    new BandScoutMonitor(sp.GetRequiredService<RadioManager>()));
+builder.Services.AddSingleton<DxHunterAgent>(sp =>
+    new DxHunterAgent(sp.GetRequiredService<RadioManager>()));
 
 // MCP Server
 builder.Services.AddMcpServer()
@@ -63,6 +69,8 @@ builder.Services.AddMcpServer()
     .WithTools<CwTransmitTools>()
     .WithTools<SsbListenerTools>()
     .WithTools<ContestTools>()
+    .WithTools<BandScoutTools>()
+    .WithTools<DxHunterTools>()
     .WithResources<RadioStateResource>()
     .WithResources<CwLiveResource>()
     .WithResources<CwRecentResource>()

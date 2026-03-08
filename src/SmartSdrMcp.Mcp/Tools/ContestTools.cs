@@ -5,6 +5,7 @@ using SmartSdrMcp.Audio;
 using SmartSdrMcp.Contest;
 using SmartSdrMcp.Radio;
 using SmartSdrMcp.Ssb;
+using SmartSdrMcp.Tx;
 
 namespace SmartSdrMcp.Mcp.Tools;
 
@@ -15,6 +16,7 @@ public class ContestTools
     private readonly RadioManager _radioManager;
     private readonly AudioPipeline _audioPipeline;
     private readonly SsbPipeline _ssbPipeline;
+    private readonly TransmitController _txController;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -26,25 +28,17 @@ public class ContestTools
         ContestAgent contestAgent,
         RadioManager radioManager,
         AudioPipeline audioPipeline,
-        SsbPipeline ssbPipeline)
+        SsbPipeline ssbPipeline,
+        TransmitController txController)
     {
         _contestAgent = contestAgent;
         _radioManager = radioManager;
         _audioPipeline = audioPipeline;
         _ssbPipeline = ssbPipeline;
+        _txController = txController;
     }
 
-    [McpServerTool, Description("Set the Anthropic API key for the contest agent's Claude Haiku analysis. Get one at https://console.anthropic.com/settings/keys")]
-    public string ContestSetApiKey(string apiKey)
-    {
-        if (string.IsNullOrWhiteSpace(apiKey))
-            return "API key cannot be empty.";
-
-        Environment.SetEnvironmentVariable("ANTHROPIC_API_KEY", apiKey);
-        return "Anthropic API key set.";
-    }
-
-    [McpServerTool, Description("Start the SSB contest agent. Requires your callsign and ANTHROPIC_API_KEY (set via contest_set_api_key). Monitors frequency, identifies running stations, and coaches operator through QSOs. Set autoMode=true to auto-call when a station is identified (skips manual ack).")]
+    [McpServerTool, Description("Start the SSB contest agent. Requires your callsign and ANTHROPIC_API_KEY environment variable. Monitors frequency, identifies running stations, and coaches operator through QSOs. Set autoMode=true to auto-call when a station is identified (skips manual ack).")]
     public string ContestAgentStart(string callsign, string? name = null, string? qth = null, bool autoMode = false, int daxChannel = 1)
     {
         if (string.IsNullOrWhiteSpace(callsign))
@@ -119,9 +113,14 @@ public class ContestTools
         return JsonSerializer.Serialize(log, JsonOptions);
     }
 
-    [McpServerTool, Description("Test voice TX by sending a text phrase via TTS through DAX TX, or a pure 1kHz tone if text='tone'. Automatically sets RF power to 0 watts for safety and restores it after.")]
+    [McpServerTool, Description("Test voice TX by sending a text phrase via TTS through DAX TX, or a pure 1kHz tone if text='tone'. Requires TX guard to be armed. Automatically sets RF power to 0 watts for safety and restores it after.")]
     public async Task<string> ContestVoiceTest(string text = "Kilo One Alpha Foxtrot")
     {
+        // Check TX guard — voice test should respect the same safety gate as CW
+        var guard = _txController.GetTxGuardState();
+        if (!guard.Armed)
+            return "TX guard is not armed. Call set_tx_guard(armed=true) first.";
+
         var radio = _radioManager.Radio;
         if (radio == null || !radio.Connected)
             return "Radio not connected.";

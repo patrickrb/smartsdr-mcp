@@ -49,9 +49,11 @@ public class SsbPipeline : IDisposable
         if (_running) return "SSB listener is already running.";
 
         if (!File.Exists(_modelPath))
-            return $"Whisper model not found at '{_modelPath}'. Download it:\n" +
-                   "Download a .bin model from https://huggingface.co/ggerganov/whisper.cpp/tree/main\n" +
-                   $"Place at: {_modelPath}";
+        {
+            Console.Error.WriteLine("[SSB] Whisper model not found. Ensure a Whisper model .bin file is available in the 'models' directory.");
+            return "Whisper model not found. Download a .bin model from https://huggingface.co/ggerganov/whisper.cpp/tree/main " +
+                   "and place it in the 'models' directory next to the application.";
+        }
 
         try
         {
@@ -241,10 +243,13 @@ public class SsbPipeline : IDisposable
         return false;
     }
 
+    private static readonly Regex ParenthesizedPattern =
+        new(@"[\(\[][^\)\]]*[\)\]]", RegexOptions.Compiled);
+
     private static string StripParenthesized(string text)
     {
         // Remove all (content) and [content] — Whisper hallucinations
-        return Regex.Replace(text, @"[\(\[][^\)\]]*[\)\]]", "");
+        return ParenthesizedPattern.Replace(text, "");
     }
 
 

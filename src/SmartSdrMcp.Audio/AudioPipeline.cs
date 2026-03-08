@@ -28,6 +28,7 @@ public class AudioPipeline : IDisposable
     private DateTime? _recordStartUtc;
     private readonly List<short> _recordPcm16 = new();
     private Timer? _recordAutoStopTimer;
+    private const int MaxRecordingSamples = 24000 * 3600; // 1 hour max at 24kHz
 
     public AudioBuffer Buffer { get; } = new();
     public bool IsRunning => _running;
@@ -77,9 +78,9 @@ public class AudioPipeline : IDisposable
     {
         lock (_startLock)
         {
+            if (_consumerCount <= 0) { _consumerCount = 0; return; }
             _consumerCount--;
             if (_consumerCount > 0) return;
-            _consumerCount = 0;
 
             _running = false;
             _currentDaxChannel = null;
@@ -182,10 +183,33 @@ public class AudioPipeline : IDisposable
         {
             if (_isRecording)
             {
-                for (int i = 0; i < mono.Length; i++)
+                if (_recordPcm16.Count >= MaxRecordingSamples)
                 {
-                    short pcm = (short)(Math.Clamp(mono[i], -1f, 1f) * short.MaxValue);
-                    _recordPcm16.Add(pcm);
+                    // Auto-stop to prevent unbounded memory growth — snapshot first, then reset state
+                    Console.Error.WriteLine("[AUDIO] Recording buffer limit reached, auto-stopping.");
+                    var snapshot = CreateRecordingSnapshot();
+                    ResetRecordingState();
+                    // Persist outside the lock to avoid holding it during I/O
+                    _ = Task.Run(() =>
+                    {
+                        try
+                        {
+                            var info = PersistRecording(snapshot);
+                            LastRecordingInfo = info;
+                        }
+                        catch (Exception ex)
+                        {
+                            Console.Error.WriteLine($"[AUDIO] Failed to save auto-stopped recording: {ex.Message}");
+                        }
+                    });
+                }
+                else
+                {
+                    for (int i = 0; i < mono.Length; i++)
+                    {
+                        short pcm = (short)(Math.Clamp(mono[i], -1f, 1f) * short.MaxValue);
+                        _recordPcm16.Add(pcm);
+                    }
                 }
             }
         }
