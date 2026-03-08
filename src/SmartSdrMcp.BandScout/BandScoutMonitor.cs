@@ -124,25 +124,40 @@ public class BandScoutMonitor
         var now = DateTime.UtcNow;
         var newActivity = new Dictionary<string, BandActivity>();
 
+        // Single-pass: materialize spots and cache PropertyInfo to avoid O(bands × spots) reflection
+        var allSpotInfos = new List<SpotInfo>(spots.Count);
+        if (spots.Count > 0)
+        {
+            var spotType = spots[0].GetType();
+            var freqProp = spotType.GetProperty("FrequencyMHz");
+            var callsignProp = spotType.GetProperty("Callsign");
+            var modeProp = spotType.GetProperty("Mode");
+            var spotterProp = spotType.GetProperty("SpotterCallsign");
+            var commentProp = spotType.GetProperty("Comment");
+            var timestampProp = spotType.GetProperty("Timestamp");
+
+            foreach (var spotObj in spots)
+            {
+                var freq = (double)(freqProp?.GetValue(spotObj) ?? 0.0);
+                var callsign = callsignProp?.GetValue(spotObj)?.ToString() ?? "";
+                var mode = modeProp?.GetValue(spotObj)?.ToString() ?? "";
+                var spotter = spotterProp?.GetValue(spotObj)?.ToString() ?? "";
+                var comment = commentProp?.GetValue(spotObj)?.ToString() ?? "";
+                var tsObj = timestampProp?.GetValue(spotObj);
+                var timestamp = tsObj is DateTime dt ? dt : (tsObj as DateTime?) ?? DateTime.MinValue;
+
+                allSpotInfos.Add(new SpotInfo(callsign, freq, mode, spotter, comment, timestamp));
+            }
+        }
+
         foreach (var (bandName, (low, high)) in HfBands)
         {
             var bandSpots = new List<SpotInfo>();
 
-            foreach (var spotObj in spots)
+            foreach (var spot in allSpotInfos)
             {
-                // ListSpots returns anonymous objects — use reflection or serialize
-                var type = spotObj.GetType();
-                var freq = (double)(type.GetProperty("FrequencyMHz")?.GetValue(spotObj) ?? 0.0);
-                var callsign = type.GetProperty("Callsign")?.GetValue(spotObj)?.ToString() ?? "";
-                var mode = type.GetProperty("Mode")?.GetValue(spotObj)?.ToString() ?? "";
-                var spotter = type.GetProperty("SpotterCallsign")?.GetValue(spotObj)?.ToString() ?? "";
-                var comment = type.GetProperty("Comment")?.GetValue(spotObj)?.ToString() ?? "";
-                var timestamp = type.GetProperty("Timestamp")?.GetValue(spotObj) as DateTime? ?? DateTime.MinValue;
-
-                if (freq >= low && freq <= high)
-                {
-                    bandSpots.Add(new SpotInfo(callsign, freq, mode, spotter, comment, timestamp));
-                }
+                if (spot.FrequencyMHz >= low && spot.FrequencyMHz <= high)
+                    bandSpots.Add(spot);
             }
 
             var uniqueCallsigns = bandSpots.Select(s => s.Callsign.ToUpperInvariant()).Distinct().Count();

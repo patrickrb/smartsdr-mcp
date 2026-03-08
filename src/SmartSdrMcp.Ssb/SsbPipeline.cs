@@ -50,7 +50,7 @@ public class SsbPipeline : IDisposable
 
         if (!File.Exists(_modelPath))
         {
-            Console.Error.WriteLine($"[SSB] Whisper model not found at: {_modelPath}");
+            Console.Error.WriteLine("[SSB] Whisper model not found. Ensure a Whisper model .bin file is available in the 'models' directory.");
             return "Whisper model not found. Download a .bin model from https://huggingface.co/ggerganov/whisper.cpp/tree/main " +
                    "and place it in the 'models' directory next to the application.";
         }

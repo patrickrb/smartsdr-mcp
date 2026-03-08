@@ -61,10 +61,14 @@ public class DxHunterAgent
             return $"Invalid file path: {ex.Message}";
         }
 
-        // Restrict to user's home directory tree
-        var homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        if (!fullPath.StartsWith(homeDir, StringComparison.OrdinalIgnoreCase))
-            return $"Access denied. Log files must be under your home directory ({homeDir}).";
+        // Restrict to user's home directory tree (normalize with trailing separator to prevent prefix bypass)
+        var homeDir = Path.GetFullPath(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile))
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+        var relativePath = Path.GetRelativePath(homeDir, fullPath);
+        if (Path.IsPathRooted(relativePath) ||
+            relativePath.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal) ||
+            relativePath.Equals("..", StringComparison.Ordinal))
+            return $"Access denied. Log files must be under your home directory ({homeDir.TrimEnd(Path.DirectorySeparatorChar)}).";
 
         if (!File.Exists(fullPath))
             return $"File not found: {fullPath}";
@@ -216,8 +220,29 @@ public class DxHunterAgent
         if (entity == "Unknown")
             return $"Could not resolve DXCC entity for {callsign}.";
 
-        var actualBand = band ?? BandScout.BandScoutMonitor.FrequencyToBand(_radioManager.GetState().FrequencyMHz);
-        var actualMode = mode ?? _radioManager.GetState().Mode;
+        string actualBand;
+        string actualMode;
+
+        if (band == null || mode == null)
+        {
+            var state = _radioManager.GetState();
+            var inferredBand = BandScout.BandScoutMonitor.FrequencyToBand(state.FrequencyMHz);
+            var inferredMode = state.Mode;
+
+            if (band == null && string.Equals(inferredBand, "OOB", StringComparison.OrdinalIgnoreCase))
+                return "Cannot infer band from radio state (radio may be disconnected). Please specify the band explicitly.";
+
+            if (mode == null && string.Equals(inferredMode, "N/A", StringComparison.OrdinalIgnoreCase))
+                return "Cannot infer mode from radio state (radio may be disconnected). Please specify the mode explicitly.";
+
+            actualBand = band ?? inferredBand;
+            actualMode = mode ?? inferredMode;
+        }
+        else
+        {
+            actualBand = band;
+            actualMode = mode;
+        }
 
         lock (_lock)
         {
@@ -278,9 +303,10 @@ public class DxHunterAgent
                 !band.Equals(_targetBand, StringComparison.OrdinalIgnoreCase))
                 continue;
 
+            // If a target mode is set, exclude spots with missing or non-matching mode
             if (!string.IsNullOrEmpty(_targetMode) &&
-                !string.IsNullOrEmpty(mode) &&
-                !mode.Equals(_targetMode, StringComparison.OrdinalIgnoreCase))
+                (string.IsNullOrEmpty(mode) ||
+                 !mode.Equals(_targetMode, StringComparison.OrdinalIgnoreCase)))
                 continue;
 
             var entity = DxccLookup.GetEntity(callsign);

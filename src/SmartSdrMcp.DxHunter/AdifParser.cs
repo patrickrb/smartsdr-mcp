@@ -51,9 +51,6 @@ public static partial class AdifParser
                 double.TryParse(freq, CultureInfo.InvariantCulture, out freqMHz);
 
             DateTime? qsoDate = null;
-            if (!string.IsNullOrEmpty(dateStr) && dateStr.Length >= 8)
-                DateTime.TryParseExact(dateStr[..8], "yyyyMMdd", CultureInfo.InvariantCulture,
-                    DateTimeStyles.None, out var d).Equals(true).ToString();
             if (!string.IsNullOrEmpty(dateStr) && dateStr.Length >= 8 &&
                 DateTime.TryParseExact(dateStr[..8], "yyyyMMdd", CultureInfo.InvariantCulture,
                     DateTimeStyles.None, out var date))
