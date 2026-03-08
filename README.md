@@ -16,6 +16,8 @@ SmartSDR MCP bridges your FlexRadio hardware with any MCP-compatible AI assistan
 - **Generate contextually appropriate CW replies** with AI assistance
 - **Transmit safely** with a proposal-approval loop: the AI suggests, you approve, then it transmits
 - **Contest automation** (experimental) — monitor SSB contest frequencies, identify stations, and auto-call
+- **Band Scout** — real-time band condition monitoring from DX spot analysis
+- **Auto-DX Hunter** — cross-reference spots against your logbook to find unworked DXCC entities
 
 The design keeps humans in the loop: no RF is ever emitted without explicit approval.
 
@@ -82,6 +84,20 @@ The design keeps humans in the loop: no RF is ever emitted without explicit appr
 
 > **Note:** Voice TX audio quality is experimental. DAX TX buffer pacing can cause distortion under some conditions.
 
+### Band Scout
+- Real-time HF band condition monitoring using DX spots from the radio
+- Scans spots every 15 seconds and groups activity by band (160m–6m)
+- Reports per-band: spot count, active modes, unique callsigns, frequency range, and activity score
+- Helps identify which bands are open and active right now
+
+### Auto-DX Hunter
+- Loads your ADIF logbook to determine which DXCC entities you've already worked
+- Monitors live DX spots and cross-references against your log
+- Identifies unworked DXCC entities by band and mode
+- Includes a ~200-entity DXCC prefix lookup table covering ITU allocations and special prefixes
+- One-click QSY to the highest-priority unworked entity
+- Mark entities as worked on the fly without reloading the log
+
 ### Live MCP Resources
 | Resource URI | Description |
 |---|---|
@@ -101,7 +117,7 @@ The design keeps humans in the loop: no RF is ever emitted without explicit appr
 | **SmartSDR** (optional) | Running for GUI access; required for DAX audio to be available |
 | **MCP client** | Claude Desktop, or any MCP-compatible host |
 | **Whisper model** (for SSB) | `ggml-small.en.bin` or `ggml-base.en.bin` in `models/` directory |
-| **Anthropic API key** (for contest agent) | Required for Claude Haiku situation analysis |
+| **Anthropic API key** (for contest agent) | Set `ANTHROPIC_API_KEY` env var for Claude Haiku situation analysis |
 
 ---
 
@@ -260,14 +276,34 @@ Or, if you prefer to run the compiled binary:
 
 | Tool | Parameters | Description |
 |---|---|---|
-| `contest_set_api_key` | `apiKey` | Set the Anthropic API key for Claude Haiku analysis |
-| `contest_agent_start` | `callsign`, `name?`, `qth?`, `autoMode?` | Start the contest agent |
+| `contest_agent_start` | `callsign`, `name?`, `qth?`, `autoMode?` | Start the contest agent (set `ANTHROPIC_API_KEY` env var for Haiku analysis) |
 | `contest_agent_stop` | — | Stop the contest agent |
 | `contest_agent_status` | — | Get current agent status (stage, prompt, running station, QSO count) |
 | `contest_agent_ack` | — | Acknowledge current prompt (operator has spoken) |
 | `contest_agent_skip` | — | Skip current opportunity, return to monitoring |
 | `contest_agent_log` | — | Get list of completed contest QSOs |
-| `contest_voice_test` | `text` (default `"Kilo One Alpha Foxtrot"`) | Test voice TX with TTS or a 1kHz tone (`text="tone"`) — RF power set to 0W for safety |
+| `contest_voice_test` | `text` (default `"Kilo One Alpha Foxtrot"`) | Test voice TX with TTS or a 1kHz tone (`text="tone"`) — requires TX guard armed |
+
+### Band Scout Tools
+
+| Tool | Parameters | Description |
+|---|---|---|
+| `band_scout_start` | — | Start band condition monitoring (scans DX spots every 15s) |
+| `band_scout_stop` | — | Stop band condition monitoring |
+| `band_scout_report` | — | Get current band activity report with per-band spot counts, modes, and activity scores |
+
+### Auto-DX Hunter Tools
+
+| Tool | Parameters | Description |
+|---|---|---|
+| `dx_hunter_load_log` | `adifFilePath` | Load an ADIF log file to identify already-worked DXCC entities |
+| `dx_hunter_start` | — | Start monitoring DX spots for unworked DXCC entities |
+| `dx_hunter_stop` | — | Stop DX spot monitoring |
+| `dx_hunter_status` | — | Get hunter status: running state, entities worked, needs count, last scan time |
+| `dx_hunter_needs` | `band?`, `mode?` | List unworked DXCC entities currently spotted, optionally filtered by band/mode |
+| `dx_hunter_tune_next` | — | QSY to the highest-priority unworked DXCC spot |
+| `dx_hunter_mark_worked` | `callsign`, `band`, `mode` | Mark a DXCC entity as worked (by callsign, band, and mode) |
+| `dx_hunter_lookup` | `callsign` | Look up the DXCC entity for a callsign |
 
 ---
 
@@ -308,6 +344,8 @@ Or, if you prefer to run the compiled binary:
 │  CwTransmitTools     flex://cw/recent             │
 │  SsbListenerTools    flex://cw/proposals          │
 │  ContestTools                                     │
+│  BandScoutTools                                   │
+│  DxHunterTools                                    │
 │                                                   │
 │  Core Services                                    │
 │  RadioManager   ←→  FlexLib (FlexRadio API)       │
@@ -320,6 +358,9 @@ Or, if you prefer to run the compiled binary:
 │  TransmitController Proposal queue + TX safety    │
 │  VoiceTransmitter   TTS → DAX TX streaming        │
 │  ClusterClient      DX cluster spot lookups       │
+│  BandScoutMonitor   DX spot band activity scoring │
+│  DxHunterAgent      DXCC needs vs. live spots     │
+│  DxccLookup         Callsign → DXCC entity        │
 └──────────────────────┬────────────────────────────┘
                        │ FlexLib / VITA 49
 ┌──────────────────────▼────────────────────────────┐
