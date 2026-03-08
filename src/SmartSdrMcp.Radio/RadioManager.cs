@@ -1,4 +1,5 @@
 using Flex.Smoothlake.FlexLib;
+using System.Globalization;
 
 namespace SmartSdrMcp.Radio;
 
@@ -128,6 +129,97 @@ public class RadioManager : IDisposable
         if (slice == null) return false;
         slice.DemodMode = mode.ToUpper();
         return true;
+    }
+
+    public bool SetActiveSlice(int sliceIndex)
+    {
+        var radio = _radio;
+        if (radio == null || !radio.Connected) return false;
+
+        var target = radio.SliceList.FirstOrDefault(s => s.Index == sliceIndex);
+        if (target == null) return false;
+
+        target.Active = true;
+        return true;
+    }
+
+    public bool StepFrequency(int stepHz, out double newFrequencyMHz)
+    {
+        newFrequencyMHz = 0;
+        var slice = GetActiveSlice();
+        if (slice == null) return false;
+
+        newFrequencyMHz = slice.Freq + (stepHz / 1_000_000.0);
+        slice.Freq = newFrequencyMHz;
+        return true;
+    }
+
+    public (bool Success, string Message) SetCwProfile(int? wpm, int? pitch, bool? breakIn, string? iambic)
+    {
+        var radio = _radio;
+        if (radio == null || !radio.Connected)
+            return (false, "Radio not connected");
+
+        var cwx = radio.GetCWX();
+        if (wpm.HasValue && wpm.Value > 0)
+            cwx.Speed = wpm.Value;
+
+        if (pitch.HasValue && pitch.Value > 0)
+            radio.CWPitch = pitch.Value;
+
+        if (breakIn.HasValue)
+            TrySetBoolProperty(radio, new[] { "BreakInEnabled", "CWBreakInEnabled", "QskEnabled" }, breakIn.Value);
+
+        if (!string.IsNullOrWhiteSpace(iambic))
+            TrySetStringProperty(radio, new[] { "IambicMode", "KeyerMode", "CWKeyerMode" }, iambic!);
+
+        string msg = string.Format(
+            CultureInfo.InvariantCulture,
+            "CW profile set: wpm={0}, pitch={1}, breakIn={2}, iambic={3}",
+            wpm?.ToString(CultureInfo.InvariantCulture) ?? "unchanged",
+            pitch?.ToString(CultureInfo.InvariantCulture) ?? "unchanged",
+            breakIn?.ToString() ?? "unchanged",
+            string.IsNullOrWhiteSpace(iambic) ? "unchanged" : iambic);
+
+        return (true, msg);
+    }
+
+    private static bool TrySetBoolProperty(object target, IEnumerable<string> propertyNames, bool value)
+    {
+        foreach (var name in propertyNames)
+        {
+            var prop = target.GetType().GetProperty(name);
+            if (prop?.CanWrite == true && prop.PropertyType == typeof(bool))
+            {
+                prop.SetValue(target, value);
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool TrySetStringProperty(object target, IEnumerable<string> propertyNames, string value)
+    {
+        foreach (var name in propertyNames)
+        {
+            var prop = target.GetType().GetProperty(name);
+            if (prop?.CanWrite != true) continue;
+
+            if (prop.PropertyType == typeof(string))
+            {
+                prop.SetValue(target, value);
+                return true;
+            }
+
+            if (prop.PropertyType.IsEnum && Enum.TryParse(prop.PropertyType, value, true, out var enumValue))
+            {
+                prop.SetValue(target, enumValue);
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private void OnRadioAdded(Flex.Smoothlake.FlexLib.Radio radio)

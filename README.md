@@ -11,9 +11,11 @@ SmartSDR MCP bridges your FlexRadio hardware with any MCP-compatible AI assistan
 - **Discover and connect** to FlexRadios on the local network
 - **Control the radio** — frequency, demodulation mode, and more
 - **Decode Morse code** in real-time using a custom DSP pipeline over DAX audio
+- **Transcribe SSB voice** using Whisper speech-to-text
 - **Track QSO state** — detect CQ calls, callsigns, signal reports, and exchanges
 - **Generate contextually appropriate CW replies** with AI assistance
 - **Transmit safely** with a proposal-approval loop: the AI suggests, you approve, then it transmits
+- **Contest automation** (experimental) — monitor SSB contest frequencies, identify stations, and auto-call
 
 The design keeps humans in the loop: no RF is ever emitted without explicit approval.
 
@@ -39,6 +41,12 @@ The design keeps humans in the loop: no RF is ever emitted without explicit appr
 - Real-time decode buffer with diagnostic telemetry (WPM, tone magnitude, noise floor)
 - Decoded message history with timestamps
 
+### SSB Voice Transcription
+- Real-time speech-to-text using Whisper (small.en or base.en models)
+- Ham radio contest-optimized prompt for better callsign/phonetic recognition
+- Hallucination filtering to suppress common Whisper artifacts
+- Live transcription buffer and segment history
+
 ### QSO Tracking
 - State machine that understands the CW QSO lifecycle:
   - Idle → Calling CQ / Answering CQ → Exchange → Closing → Idle
@@ -54,6 +62,15 @@ The design keeps humans in the loop: no RF is ever emitted without explicit appr
 - `CwSendText` approves and sends a pending proposal **or** transmits custom freeform text
 - Emergency abort (`CwAbort`) stops transmission immediately
 - QSO tracker is notified of every sent message to keep state consistent
+
+### Contest Agent (Experimental)
+- Monitors SSB contest frequencies via Whisper transcription + Claude Haiku analysis
+- Identifies running stations calling CQ and determines optimal call timing
+- DX cluster integration (HamQTH) for station identification when transcription is ambiguous
+- Auto-call mode with TTS voice TX through DAX TX
+- State machine tracks QSO progression: Monitoring → CallingStation → ExchangingReports → Completing
+
+> **Note:** Voice TX audio quality is experimental. DAX TX buffer pacing can cause distortion under some conditions.
 
 ### Live MCP Resources
 | Resource URI | Description |
@@ -73,6 +90,8 @@ The design keeps humans in the loop: no RF is ever emitted without explicit appr
 | **FlexRadio hardware** | Flex 6000/8000 series on the same network subnet |
 | **SmartSDR** (optional) | Running for GUI access; required for DAX audio to be available |
 | **MCP client** | Claude Desktop, or any MCP-compatible host |
+| **Whisper model** (for SSB) | `ggml-small.en.bin` or `ggml-base.en.bin` in `models/` directory |
+| **Anthropic API key** (for contest agent) | Required for Claude Haiku situation analysis |
 
 ---
 
@@ -94,11 +113,12 @@ dotnet build --configuration Release
 
 ## Configuration
 
-Open `src/SmartSdrMcp/Program.cs` and update the two constants near the top:
+Open `src/SmartSdrMcp/Program.cs` and update the constants near the top:
 
 ```csharp
 const string MyCallsign = "K1AF";    // ← your amateur radio callsign
 const string MyName     = "PATRICK"; // ← your name (used in CW exchanges)
+const string MyQth      = "Kansas";  // ← your location (used in contest exchanges)
 ```
 
 These values are used by the QSO tracker (to recognize messages addressed to you) and by the AI reply generator (to sign outgoing CW).
@@ -155,51 +175,86 @@ Or, if you prefer to run the compiled binary:
 
 | Tool | Parameters | Description |
 |---|---|---|
-| `ConnectRadio` | `serial?`, `ip?` | Discover and connect to a FlexRadio on the network. Optionally target a specific serial number or IP address. |
-| `DisconnectRadio` | — | Disconnect from the currently connected radio. |
-| `GetRadioState` | — | Return current frequency, mode, TX state, and CW pitch as JSON. |
-| `SetFrequency` | `frequencyMHz` | Set the active slice frequency in MHz (e.g., `14.035`). |
-| `SetMode` | `mode` | Set the demodulation mode: `CW`, `USB`, `LSB`, `AM`, or `FM`. |
+| `connect_radio` | `serial?`, `ip?` | Discover and connect to a FlexRadio on the network |
+| `list_radios` | — | Discover radios currently visible on the network |
+| `disconnect_radio` | — | Disconnect from the currently connected radio |
+| `get_radio_state` | — | Get current frequency, mode, TX state, and CW pitch |
+| `radio_health` | — | Get overall radio/listener health diagnostics |
+| `set_frequency` | `frequencyMHz` | Set the active slice frequency in MHz (e.g., `14.035`) |
+| `step_frequency` | `hz` | Step active slice frequency by N Hz (positive or negative) |
+| `set_active_slice` | `index` | Set the active slice by index |
+| `set_mode` | `mode` | Set the demodulation mode: `CW`, `USB`, `LSB`, `AM`, or `FM` |
+| `set_cw_profile` | `wpm?`, `pitch?`, `breakIn?`, `iambic?` | Set CW profile values in one operation |
 
 ### CW Listener Tools
 
 | Tool | Parameters | Description |
 |---|---|---|
-| `CwListenerStart` | `daxChannel` (default `1`), `fixedWpm` (default `0` = auto) | Start Morse decoding on the specified DAX channel. Configures the band-pass filter to the radio's CW pitch automatically. |
-| `CwListenerStop` | — | Stop CW decoding and release the DAX audio stream. |
-| `CwGetLiveText` | — | Get the real-time decode buffer with diagnostic telemetry (WPM, tone magnitude, noise floor, key-event log). |
-| `CwGetRecentMessages` | `count` (default `10`) | Return the last N decoded messages with timestamps, callsigns, and CQ detection flags. |
-| `CwGetQsoState` | — | Return the current QSO state machine snapshot as JSON. |
-| `CwResetQso` | — | Reset QSO tracking and the decode buffer back to Idle. |
+| `cw_listener_start` | `daxChannel` (default `1`), `fixedWpm` (default `0` = auto) | Start Morse decoding on the specified DAX channel |
+| `cw_listener_stop` | — | Stop CW decoding and release the DAX audio stream |
+| `cw_get_live_text` | — | Get the real-time decode buffer with diagnostics |
+| `cw_decode_diagnostics` | — | Get low-level decoder diagnostics for troubleshooting |
+| `cw_get_recent_messages` | `count` (default `10`) | Get the last N decoded messages with timestamps |
+| `cw_get_qso_state` | — | Get the current QSO state machine snapshot |
+| `cw_reset_qso` | — | Reset QSO tracking back to Idle |
+| `record_audio_start` | `format`, `seconds?` | Start recording DAX audio (wav or raw) |
+| `record_audio_stop` | — | Stop recording and return file details |
+| `qso_export` | `format` | Export QSO data (json or adif) |
 
 ### CW Transmit Tools
 
 | Tool | Parameters | Description |
 |---|---|---|
-| `CwGenerateReply` | — | Generate an AI-suggested CW reply based on the current QSO state. Returns a proposal ID, suggested text, reason, WPM, and estimated duration. |
-| `CwGetPendingReplies` | — | List all proposals currently awaiting approval. |
-| `CwSendText` | `proposalId?`, `customText?`, `wpm` (default `20`) | Approve and transmit a pending proposal by ID, **or** send freeform custom text. **This transmits on the air.** |
-| `CwAbort` | — | Emergency stop — immediately halt any CW transmission in progress. |
+| `cw_generate_reply` | — | Generate an AI-suggested CW reply based on QSO state |
+| `cw_get_pending_replies` | — | List all proposals currently awaiting approval |
+| `clear_pending_replies` | — | Clear all queued reply proposals |
+| `set_tx_guard` | `armed?`, `maxSeconds?`, `requireProposal?` | Configure TX guard safety settings |
+| `get_tx_guard` | — | Get current TX guard settings |
+| `cw_send_text` | `proposalId?`, `customText?`, `wpm` (default `20`) | Approve and transmit a pending proposal, or send custom text |
+| `cw_abort` | — | Emergency stop — immediately halt CW transmission |
+| `run_macro` | `name` | Run predefined macro workflows (find_cq, answer_cq, close_qso_safely) |
+
+### SSB Listener Tools
+
+| Tool | Parameters | Description |
+|---|---|---|
+| `ssb_listener_start` | `daxChannel` (default `1`) | Start SSB speech-to-text listener using Whisper |
+| `ssb_listener_stop` | — | Stop SSB speech-to-text listener |
+| `ssb_get_live_text` | — | Get live SSB transcription |
+| `ssb_get_recent_messages` | `count` (default `10`) | Get the last N transcribed SSB speech segments |
+
+### Contest Agent Tools (Experimental)
+
+| Tool | Parameters | Description |
+|---|---|---|
+| `contest_set_api_key` | `apiKey` | Set the Anthropic API key for Claude Haiku analysis |
+| `contest_agent_start` | `callsign`, `name?`, `qth?`, `autoMode?` | Start the contest agent |
+| `contest_agent_stop` | — | Stop the contest agent |
+| `contest_agent_status` | — | Get current agent status (stage, prompt, running station, QSO count) |
+| `contest_agent_ack` | — | Acknowledge current prompt (operator has spoken) |
+| `contest_agent_skip` | — | Skip current opportunity, return to monitoring |
+| `contest_agent_log` | — | Get list of completed contest QSOs |
+| `contest_voice_test` | `text` (default `"Kilo One Alpha Foxtrot"`) | Test voice TX with TTS or a 1kHz tone (`text="tone"`) — RF power set to 0W for safety |
 
 ---
 
 ## Typical Workflow
 
 ```
-1.  ConnectRadio()               – discover and connect to the radio
-2.  SetFrequency(14.035)         – tune to 20 m CW
-3.  SetMode("CW")                – set demodulation mode
-4.  CwListenerStart()            – begin decoding Morse
-         ┌─ CwGetLiveText()      – monitor real-time decode
-         └─ CwGetRecentMessages()– review decoded history
-5.  CwGetQsoState()              – check what the AI knows about the QSO
-6.  CwGenerateReply()            – AI proposes a reply (no RF yet)
-7.  CwGetPendingReplies()        – review the proposal
-8.  CwSendText(proposalId=...)   – approve → transmit
+1.  connect_radio()              – discover and connect to the radio
+2.  set_frequency(14.035)        – tune to 20 m CW
+3.  set_mode("CW")               – set demodulation mode
+4.  cw_listener_start()          – begin decoding Morse
+         ┌─ cw_get_live_text()   – monitor real-time decode
+         └─ cw_get_recent_messages() – review decoded history
+5.  cw_get_qso_state()           – check what the AI knows about the QSO
+6.  cw_generate_reply()          – AI proposes a reply (no RF yet)
+7.  cw_get_pending_replies()     – review the proposal
+8.  cw_send_text(proposalId=...) – approve → transmit
          or
-    CwAbort()                    – cancel at any time
-9.  CwListenerStop()             – done for the session
-10. DisconnectRadio()
+    cw_abort()                   – cancel at any time
+9.  cw_listener_stop()           – done for the session
+10. disconnect_radio()
 ```
 
 ---
@@ -218,16 +273,20 @@ Or, if you prefer to run the compiled binary:
 │  RadioTools          flex://radio/state           │
 │  CwListenerTools     flex://cw/live               │
 │  CwTransmitTools     flex://cw/recent             │
-│                      flex://cw/proposals          │
+│  SsbListenerTools    flex://cw/proposals          │
+│  ContestTools                                     │
 │                                                   │
 │  Core Services                                    │
 │  RadioManager   ←→  FlexLib (FlexRadio API)       │
 │  AudioPipeline  ←→  DAX (24 kHz PCM over network) │
-│  CwPipeline         BPF → AGC → Envelope → Morse  │
-│  MessageSegmenter   Groups chars into messages    │
+│  CwPipeline         BPF → Goertzel → Envelope     │
+│  SsbPipeline        Whisper speech-to-text        │
+│  ContestAgent       Haiku analysis + state machine│
 │  QsoTracker         State machine (QSO lifecycle) │
 │  ReplyGenerator     Contextual CW reply logic     │
 │  TransmitController Proposal queue + TX safety    │
+│  VoiceTransmitter   TTS → DAX TX streaming        │
+│  ClusterClient      DX cluster spot lookups       │
 └──────────────────────┬────────────────────────────┘
                        │ FlexLib / VITA 49
 ┌──────────────────────▼────────────────────────────┐
@@ -252,6 +311,8 @@ Or, if you prefer to run the compiled binary:
 | Framework | .NET 9.0 |
 | MCP library | `ModelContextProtocol` v1.0.0 |
 | Radio API | FlexLib (ported to .NET 9, included in `lib/`) |
+| Speech-to-text | Whisper.net (whisper.cpp bindings) |
+| AI analysis | Anthropic Claude Haiku (contest agent) |
 | Data streaming | VITA 49 protocol (UDP) for real-time audio and waterfall |
 | Audio | 24 kHz mono PCM de-interleaved from DAX stereo stream |
 | DI / hosting | `Microsoft.Extensions.Hosting` v9.0.0 |
