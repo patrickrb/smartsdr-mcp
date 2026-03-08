@@ -367,6 +367,142 @@ public class RadioTools
         return ok ? "AGC settings updated." : "No active slice.";
     }
 
+    [McpServerTool, Description("Get the current RX and TX antenna for the active slice, plus available antenna lists.")]
+    public string GetAntenna()
+    {
+        if (!_radioManager.IsConnected) return "Not connected to a radio.";
+        var ant = _radioManager.GetAntenna();
+        return ant == null ? "No active slice." : JsonSerializer.Serialize(ant, new JsonSerializerOptions { WriteIndented = true });
+    }
+
+    [McpServerTool, Description("Set the RX and/or TX antenna for the active slice. Use get_antenna to see available options.")]
+    public string SetAntenna(string? rxAnt = null, string? txAnt = null)
+    {
+        if (!_radioManager.IsConnected) return "Not connected to a radio.";
+        bool ok = _radioManager.SetAntenna(rxAnt, txAnt);
+        return ok ? $"Antenna set: RX={rxAnt ?? "unchanged"}, TX={txAnt ?? "unchanged"}" : "No active slice.";
+    }
+
+    [McpServerTool, Description("Get audio settings (gain, pan, mute) for the active slice.")]
+    public string GetSliceAudio()
+    {
+        if (!_radioManager.IsConnected) return "Not connected to a radio.";
+        var audio = _radioManager.GetSliceAudio();
+        return audio == null ? "No active slice." : JsonSerializer.Serialize(audio, new JsonSerializerOptions { WriteIndented = true });
+    }
+
+    [McpServerTool, Description("Set audio gain (0-100), pan (0-100, 50=center), and/or mute for the active slice.")]
+    public string SetSliceAudio(int? audioGain = null, int? audioPan = null, bool? mute = null)
+    {
+        if (!_radioManager.IsConnected) return "Not connected to a radio.";
+        bool ok = _radioManager.SetSliceAudio(audioGain, audioPan, mute);
+        return ok ? "Slice audio updated." : "No active slice.";
+    }
+
+    [McpServerTool, Description("Get TX state: MOX (PTT), TX tune, TX monitor, TX inhibit.")]
+    public string GetTxState()
+    {
+        if (!_radioManager.IsConnected) return "Not connected to a radio.";
+        var tx = _radioManager.GetTxState();
+        return tx == null ? "TX state unavailable." : JsonSerializer.Serialize(tx, new JsonSerializerOptions { WriteIndented = true });
+    }
+
+    [McpServerTool, Description("Set TX controls: mox (PTT on/off), txTune (tune carrier), txMonitor (monitor TX audio), txInhibit (safety lockout). All optional.")]
+    public string SetTx(bool? mox = null, bool? txTune = null, bool? txMonitor = null, bool? txInhibit = null)
+    {
+        if (!_radioManager.IsConnected) return "Not connected to a radio.";
+        bool ok = _radioManager.SetTx(mox, txTune, txMonitor, txInhibit);
+        return ok ? "TX settings updated." : "Failed to update TX settings.";
+    }
+
+    [McpServerTool, Description("Get equalizer settings for TX or RX. Select: 'tx' or 'rx'. Returns enabled state and all band levels.")]
+    public string GetEqualizer(string select)
+    {
+        if (!_radioManager.IsConnected) return "Not connected to a radio.";
+        var eq = _radioManager.GetEqualizer(select);
+        return eq == null ? $"Equalizer '{select}' not found. Use 'tx' or 'rx'." : JsonSerializer.Serialize(eq, new JsonSerializerOptions { WriteIndented = true });
+    }
+
+    [McpServerTool, Description("Set equalizer for TX or RX. Select: 'tx' or 'rx'. Set enabled and band levels (dB): hz63, hz125, hz250, hz500, hz1000, hz2000, hz4000, hz8000.")]
+    public string SetEqualizer(string select, bool? enabled = null, int? hz63 = null, int? hz125 = null, int? hz250 = null, int? hz500 = null, int? hz1000 = null, int? hz2000 = null, int? hz4000 = null, int? hz8000 = null)
+    {
+        if (!_radioManager.IsConnected) return "Not connected to a radio.";
+        bool ok = _radioManager.SetEqualizer(select, enabled, hz63, hz125, hz250, hz500, hz1000, hz2000, hz4000, hz8000);
+        return ok ? $"{select.ToUpper()} equalizer updated." : $"Equalizer '{select}' not found. Use 'tx' or 'rx'.";
+    }
+
+    [McpServerTool, Description("Get microphone settings: level, boost, bias, input source, and available input list.")]
+    public string GetMic()
+    {
+        if (!_radioManager.IsConnected) return "Not connected to a radio.";
+        var mic = _radioManager.GetMic();
+        return mic == null ? "Mic data unavailable." : JsonSerializer.Serialize(mic, new JsonSerializerOptions { WriteIndented = true });
+    }
+
+    [McpServerTool, Description("Set microphone settings: level (0-100), boost (on/off), bias (on/off), input source. All optional.")]
+    public string SetMic(int? micLevel = null, bool? micBoost = null, bool? micBias = null, string? micInput = null)
+    {
+        if (!_radioManager.IsConnected) return "Not connected to a radio.";
+        bool ok = _radioManager.SetMic(micLevel, micBoost, micBias, micInput);
+        return ok ? "Mic settings updated." : "Failed to update mic settings.";
+    }
+
+    [McpServerTool, Description("Get TX audio processing settings: compander (on/level) and speech processor (enable/level).")]
+    public string GetTxAudioProcessing()
+    {
+        if (!_radioManager.IsConnected) return "Not connected to a radio.";
+        var txAudio = _radioManager.GetTxAudioProcessing();
+        return txAudio == null ? "TX audio data unavailable." : JsonSerializer.Serialize(txAudio, new JsonSerializerOptions { WriteIndented = true });
+    }
+
+    [McpServerTool, Description("Set TX audio processing: companderOn, companderLevel (0-100), speechProcessorEnable, speechProcessorLevel (0-100). All optional.")]
+    public string SetTxAudioProcessing(bool? companderOn = null, int? companderLevel = null, bool? speechProcessorEnable = null, uint? speechProcessorLevel = null)
+    {
+        if (!_radioManager.IsConnected) return "Not connected to a radio.";
+        bool ok = _radioManager.SetTxAudioProcessing(companderOn, companderLevel, speechProcessorEnable, speechProcessorLevel);
+        return ok ? "TX audio processing updated." : "Failed to update TX audio processing.";
+    }
+
+    [McpServerTool, Description("Get VOX (Voice-Operated Transmit) settings: enabled, level, delay.")]
+    public string GetVox()
+    {
+        if (!_radioManager.IsConnected) return "Not connected to a radio.";
+        var vox = _radioManager.GetVox();
+        return vox == null ? "VOX data unavailable." : JsonSerializer.Serialize(vox, new JsonSerializerOptions { WriteIndented = true });
+    }
+
+    [McpServerTool, Description("Set VOX settings: enabled (on/off), level (0-100), delay (ms). All optional.")]
+    public string SetVox(bool? enabled = null, int? level = null, int? delay = null)
+    {
+        if (!_radioManager.IsConnected) return "Not connected to a radio.";
+        bool ok = _radioManager.SetVox(enabled, level, delay);
+        return ok ? "VOX settings updated." : "Failed to update VOX settings.";
+    }
+
+    [McpServerTool, Description("List all panadapters (spectrum displays) with center frequency, bandwidth, dBm range, FPS, and band.")]
+    public string ListPanadapters()
+    {
+        if (!_radioManager.IsConnected) return "Not connected to a radio.";
+        var pans = _radioManager.ListPanadapters();
+        return pans.Count == 0 ? "No panadapters." : JsonSerializer.Serialize(pans, new JsonSerializerOptions { WriteIndented = true });
+    }
+
+    [McpServerTool, Description("Set panadapter display: centerFreq (MHz), bandwidth (MHz), lowDbm, highDbm, fps, average. Requires streamId in hex from list_panadapters.")]
+    public string SetPanadapter(string streamId, double? centerFreq = null, double? bandwidth = null, double? lowDbm = null, double? highDbm = null, int? fps = null, int? average = null)
+    {
+        if (!_radioManager.IsConnected) return "Not connected to a radio.";
+        bool ok = _radioManager.SetPanadapter(streamId, centerFreq, bandwidth, lowDbm, highDbm, fps, average);
+        return ok ? "Panadapter updated." : "Panadapter not found. Use list_panadapters to get stream IDs.";
+    }
+
+    [McpServerTool, Description("Tune the active slice to a DX spot's frequency by callsign.")]
+    public string TuneToSpot(string callsign)
+    {
+        if (!_radioManager.IsConnected) return "Not connected to a radio.";
+        var (_, message) = _radioManager.TuneToSpot(callsign);
+        return message;
+    }
+
     [McpServerTool, Description("Set CW profile values in one operation. All params optional: wpm, pitch, breakIn, iambic.")]
     public string SetCwProfile(int? wpm = null, int? pitch = null, bool? breakIn = null, string? iambic = null)
     {
