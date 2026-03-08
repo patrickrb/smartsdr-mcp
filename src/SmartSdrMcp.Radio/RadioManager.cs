@@ -136,6 +136,21 @@ public class RadioManager : IDisposable
         return true;
     }
 
+    public (int Low, int High)? GetFilter()
+    {
+        var slice = GetActiveSlice();
+        if (slice == null) return null;
+        return (slice.FilterLow, slice.FilterHigh);
+    }
+
+    public bool SetFilter(int low, int high)
+    {
+        var slice = GetActiveSlice();
+        if (slice == null) return false;
+        slice.UpdateFilter(low, high);
+        return true;
+    }
+
     public bool SetActiveSlice(int sliceIndex)
     {
         var radio = _radio;

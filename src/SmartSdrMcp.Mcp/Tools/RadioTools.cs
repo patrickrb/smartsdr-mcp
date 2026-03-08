@@ -168,6 +168,29 @@ public class RadioTools
         return ok ? $"Mode set to {mode.ToUpper()}" : "Failed to set mode.";
     }
 
+    [McpServerTool, Description("Get the current receiver passband filter bounds (low/high Hz) for the active slice.")]
+    public string GetFilter()
+    {
+        if (!_radioManager.IsConnected)
+            return "Not connected to a radio.";
+
+        var filter = _radioManager.GetFilter();
+        if (filter == null)
+            return "No active slice.";
+
+        return JsonSerializer.Serialize(new { FilterLow = filter.Value.Low, FilterHigh = filter.Value.High }, new JsonSerializerOptions { WriteIndented = true });
+    }
+
+    [McpServerTool, Description("Set the receiver passband filter bounds in Hz. Example: low=200, high=1000 for narrow CW.")]
+    public string SetFilter(int low, int high)
+    {
+        if (!_radioManager.IsConnected)
+            return "Not connected to a radio.";
+
+        bool ok = _radioManager.SetFilter(low, high);
+        return ok ? $"Filter set to {low}-{high} Hz" : "No active slice.";
+    }
+
     [McpServerTool, Description("Get real-time meter readings from the radio including S-meter, SWR, forward/reflected power, PA temperature, voltage, mic level, ALC, and compression. Values update continuously while connected.")]
     public string GetMeters()
     {
