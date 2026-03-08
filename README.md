@@ -35,7 +35,7 @@ The design keeps humans in the loop: no RF is ever emitted without explicit appr
 - Read real-time meters: S-meter, SWR, forward/reflected power, PA temperature, voltage, ALC
 - Set RF transmit power and tune power levels
 - Manage Tracking Notch Filters (TNF) to null out interference
-- Control antenna tuner (ATU): status, enable/disable, auto-tune
+- Control antenna tuner (ATU): status and auto-tune
 - Save, load, and delete memory channels
 - View and manage DX spots
 - Read GPS/GNSS data: grid square, coordinates, altitude, satellites
@@ -217,7 +217,7 @@ Or, if you prefer to run the compiled binary:
 | `list_spots` | — | List all DX spots with callsign, frequency, mode, spotter |
 | `remove_spot` | `callsign` | Remove a DX spot by callsign |
 | `get_agc` | — | Get AGC settings (mode, threshold, off-level) |
-| `set_agc` | `mode?`, `threshold?`, `offLevel?` | Set AGC mode (off/slow/med/fast) and threshold |
+| `set_agc` | `mode?`, `threshold?`, `offLevel?` | Set AGC mode (off/slow/medium/fast) and threshold |
 
 ### CW Listener Tools
 

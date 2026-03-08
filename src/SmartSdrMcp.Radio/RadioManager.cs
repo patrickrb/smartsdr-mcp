@@ -514,8 +514,17 @@ public class RadioManager : IDisposable
     {
         var slice = GetActiveSlice();
         if (slice == null) return false;
-        if (mode != null && Enum.TryParse<AGCMode>(mode, true, out var agcMode))
-            slice.AGCMode = agcMode;
+        if (mode != null)
+        {
+            var normalizedMode = mode;
+            if (normalizedMode.Equals("med", StringComparison.OrdinalIgnoreCase))
+                normalizedMode = "Medium";
+
+            if (Enum.TryParse<AGCMode>(normalizedMode, true, out var agcMode))
+                slice.AGCMode = agcMode;
+            else
+                return false;
+        }
         if (threshold.HasValue) slice.AGCThreshold = threshold.Value;
         if (offLevel.HasValue) slice.AGCOffLevel = offLevel.Value;
         return true;

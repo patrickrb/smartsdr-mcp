@@ -349,7 +349,7 @@ public class RadioTools
         return ok ? $"Spot for {callsign} removed." : $"Spot for {callsign} not found.";
     }
 
-    [McpServerTool, Description("Get AGC (Automatic Gain Control) settings for the active slice: mode (off/slow/med/fast), threshold, off-level.")]
+    [McpServerTool, Description("Get AGC (Automatic Gain Control) settings for the active slice: mode (off/slow/medium/fast), threshold, off-level.")]
     public string GetAgc()
     {
         if (!_radioManager.IsConnected)
@@ -358,7 +358,7 @@ public class RadioTools
         return agc == null ? "No active slice." : JsonSerializer.Serialize(agc, new JsonSerializerOptions { WriteIndented = true });
     }
 
-    [McpServerTool, Description("Set AGC mode (off, slow, med, fast), threshold, and/or off-level for the active slice.")]
+    [McpServerTool, Description("Set AGC mode (off, slow, medium, fast), threshold, and/or off-level for the active slice.")]
     public string SetAgc(string? mode = null, int? threshold = null, int? offLevel = null)
     {
         if (!_radioManager.IsConnected)
