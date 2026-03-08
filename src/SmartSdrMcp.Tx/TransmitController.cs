@@ -12,6 +12,7 @@ public class TransmitController
     private readonly TransmitSafety _safety;
     private readonly List<ReplyProposal> _pendingProposals = new();
     private readonly object _lock = new();
+    private const int MaxProposals = 50;
 
     private bool _txArmed;
     private bool _requireProposal = true;
@@ -31,6 +32,12 @@ public class TransmitController
     {
         lock (_lock)
         {
+            // Prune sent/old proposals to prevent unbounded growth
+            if (_pendingProposals.Count >= MaxProposals)
+                _pendingProposals.RemoveAll(p => p.Sent);
+            if (_pendingProposals.Count >= MaxProposals)
+                _pendingProposals.RemoveRange(0, _pendingProposals.Count - MaxProposals + 1);
+
             _pendingProposals.Add(proposal);
         }
 
@@ -103,6 +110,10 @@ public class TransmitController
         return SendTextInternal(text, wpm, fromProposal: false);
     }
 
+    // Valid CW characters: letters, digits, space, prosigns, common punctuation
+    private static readonly System.Text.RegularExpressions.Regex SafeCwText =
+        new(@"^[A-Za-z0-9 /=?.,'!\-()@+]+$", System.Text.RegularExpressions.RegexOptions.Compiled);
+
     private (bool Success, string Message) SendTextInternal(string text, int wpm, bool fromProposal)
     {
         var guard = GetTxGuardState();
@@ -111,6 +122,13 @@ public class TransmitController
 
         if (guard.RequireProposal && !fromProposal)
             return (false, "TX guard blocked direct text: requireProposal=true, use a proposal ID.");
+
+        // Validate CW text contains only Morse-safe characters
+        if (string.IsNullOrWhiteSpace(text))
+            return (false, "CW text cannot be empty.");
+
+        if (!SafeCwText.IsMatch(text))
+            return (false, "CW text contains invalid characters. Only letters, digits, space, and standard punctuation are allowed.");
 
         var radio = _radioManager.Radio;
         if (radio == null || !radio.Connected)
@@ -130,7 +148,7 @@ public class TransmitController
         {
             var cwx = radio.GetCWX();
             cwx.Speed = wpm;
-            cwx.Send(text);
+            cwx.Send(text.ToUpperInvariant());
             TransmitStarted?.Invoke(text);
             return (true, $"Sending: {text}");
         }

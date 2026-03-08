@@ -128,10 +128,15 @@ public class RadioManager : IDisposable
         return true;
     }
 
+    private static readonly HashSet<string> ValidModes = new(StringComparer.OrdinalIgnoreCase)
+        { "CW", "USB", "LSB", "AM", "SAM", "FM", "NFM", "DFM", "DIGU", "DIGL", "FDV", "RAW" };
+
     public bool SetMode(string mode)
     {
         var slice = GetActiveSlice();
         if (slice == null) return false;
+        if (!ValidModes.Contains(mode))
+            return false;
         slice.DemodMode = mode.ToUpper();
         return true;
     }

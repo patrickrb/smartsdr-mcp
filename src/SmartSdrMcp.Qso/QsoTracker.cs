@@ -38,11 +38,14 @@ public partial class QsoTracker
 
     public void NotifySent(string text)
     {
-        CurrentState = CurrentState with { LastSent = text };
-
-        if (CurrentState.Stage == QsoStage.CqDetected)
+        lock (_lock)
         {
-            CurrentState = CurrentState with { Stage = QsoStage.Replied };
+            CurrentState = CurrentState with { LastSent = text };
+
+            if (CurrentState.Stage == QsoStage.CqDetected)
+            {
+                CurrentState = CurrentState with { Stage = QsoStage.Replied };
+            }
         }
 
         StateChanged?.Invoke(CurrentState);
@@ -58,7 +61,10 @@ public partial class QsoTracker
 
     public void ResetQso()
     {
-        CurrentState = QsoState.Empty;
+        lock (_lock)
+        {
+            CurrentState = QsoState.Empty;
+        }
         StateChanged?.Invoke(CurrentState);
     }
 
@@ -66,86 +72,89 @@ public partial class QsoTracker
     {
         var text = message.DecodedText.ToUpper();
 
-        switch (CurrentState.Stage)
+        lock (_lock)
         {
-            case QsoStage.Idle:
-                if (message.IsCq || text.Contains(_myCallsign))
-                {
-                    CurrentState = new QsoState(
-                        TheirCallsign: message.DetectedCallsign,
-                        Stage: QsoStage.CqDetected,
-                        LastReceived: message,
-                        LastSent: null,
-                        TheirName: null,
-                        TheirQth: null,
-                        TheirRst: null,
-                        StartTime: DateTime.UtcNow);
-                }
-                break;
+            switch (CurrentState.Stage)
+            {
+                case QsoStage.Idle:
+                    if (message.IsCq || text.Contains(_myCallsign))
+                    {
+                        CurrentState = new QsoState(
+                            TheirCallsign: message.DetectedCallsign,
+                            Stage: QsoStage.CqDetected,
+                            LastReceived: message,
+                            LastSent: null,
+                            TheirName: null,
+                            TheirQth: null,
+                            TheirRst: null,
+                            StartTime: DateTime.UtcNow);
+                    }
+                    break;
 
-            case QsoStage.CqDetected:
-            case QsoStage.Replied:
-                if (ContainsSignalReport(text))
-                {
+                case QsoStage.CqDetected:
+                case QsoStage.Replied:
+                    if (ContainsSignalReport(text))
+                    {
+                        CurrentState = CurrentState with
+                        {
+                            Stage = QsoStage.ExchangingReports,
+                            LastReceived = message,
+                            TheirRst = ExtractRst(text),
+                            TheirCallsign = message.DetectedCallsign ?? CurrentState.TheirCallsign
+                        };
+                    }
+                    else if (message.DetectedCallsign != null)
+                    {
+                        CurrentState = CurrentState with
+                        {
+                            TheirCallsign = message.DetectedCallsign,
+                            LastReceived = message
+                        };
+                    }
+                    break;
+
+                case QsoStage.ExchangingReports:
+                    var name = ExtractName(text);
+                    var qth = ExtractQth(text);
                     CurrentState = CurrentState with
                     {
-                        Stage = QsoStage.ExchangingReports,
+                        Stage = QsoStage.Conversation,
                         LastReceived = message,
-                        TheirRst = ExtractRst(text),
-                        TheirCallsign = message.DetectedCallsign ?? CurrentState.TheirCallsign
+                        TheirName = name ?? CurrentState.TheirName,
+                        TheirQth = qth ?? CurrentState.TheirQth
                     };
-                }
-                else if (message.DetectedCallsign != null)
-                {
+                    break;
+
+                case QsoStage.Conversation:
+                    if (text.Contains("73") || text.Contains("<SK>") || text.Contains("TU"))
+                    {
+                        CurrentState = CurrentState with
+                        {
+                            Stage = QsoStage.Closing,
+                            LastReceived = message
+                        };
+                    }
+                    else
+                    {
+                        var n = ExtractName(text);
+                        var q = ExtractQth(text);
+                        CurrentState = CurrentState with
+                        {
+                            LastReceived = message,
+                            TheirName = n ?? CurrentState.TheirName,
+                            TheirQth = q ?? CurrentState.TheirQth
+                        };
+                    }
+                    break;
+
+                case QsoStage.Closing:
                     CurrentState = CurrentState with
                     {
-                        TheirCallsign = message.DetectedCallsign,
+                        Stage = QsoStage.Complete,
                         LastReceived = message
                     };
-                }
-                break;
-
-            case QsoStage.ExchangingReports:
-                var name = ExtractName(text);
-                var qth = ExtractQth(text);
-                CurrentState = CurrentState with
-                {
-                    Stage = QsoStage.Conversation,
-                    LastReceived = message,
-                    TheirName = name ?? CurrentState.TheirName,
-                    TheirQth = qth ?? CurrentState.TheirQth
-                };
-                break;
-
-            case QsoStage.Conversation:
-                if (text.Contains("73") || text.Contains("<SK>") || text.Contains("TU"))
-                {
-                    CurrentState = CurrentState with
-                    {
-                        Stage = QsoStage.Closing,
-                        LastReceived = message
-                    };
-                }
-                else
-                {
-                    var n = ExtractName(text);
-                    var q = ExtractQth(text);
-                    CurrentState = CurrentState with
-                    {
-                        LastReceived = message,
-                        TheirName = n ?? CurrentState.TheirName,
-                        TheirQth = q ?? CurrentState.TheirQth
-                    };
-                }
-                break;
-
-            case QsoStage.Closing:
-                CurrentState = CurrentState with
-                {
-                    Stage = QsoStage.Complete,
-                    LastReceived = message
-                };
-                break;
+                    break;
+            }
         }
 
         StateChanged?.Invoke(CurrentState);

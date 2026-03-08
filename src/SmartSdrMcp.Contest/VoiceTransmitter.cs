@@ -68,6 +68,13 @@ public class VoiceTransmitter
 
     private async Task<(bool Success, string Message)> StreamToRadio(Flex.Smoothlake.FlexLib.Radio radio, float[] samples, string successMessage)
     {
+        // Verify frequency is within amateur bands before keying MOX
+        var state = _radioManager.GetState();
+        var safety = new SmartSdrMcp.Tx.TransmitSafety();
+        var freqCheck = safety.CheckTransmitAllowed(state.FrequencyMHz);
+        if (!freqCheck.Allowed)
+            return (false, $"TX blocked: {freqCheck.Reason}");
+
         // Get or create DAX TX stream
         DAXTXAudioStream? txStream = null;
         var tcs = new TaskCompletionSource<DAXTXAudioStream>();
@@ -169,22 +176,44 @@ public class VoiceTransmitter
         return packets;
     }
 
+    // Allowed characters for TTS text: letters, digits, spaces, basic punctuation.
+    // Rejects anything that could be interpreted as code by PowerShell.
+    private static readonly System.Text.RegularExpressions.Regex SafeTtsText =
+        new(@"^[A-Za-z0-9 .,!?\-']+$", System.Text.RegularExpressions.RegexOptions.Compiled);
+
     private static async Task<bool> GenerateWavAsync(string text, string wavPath)
     {
-        // Write a temp PowerShell script to avoid escaping issues
+        // Validate input: only allow safe characters to prevent injection
+        if (string.IsNullOrWhiteSpace(text) || text.Length > 500)
+            return false;
+
+        if (!SafeTtsText.IsMatch(text))
+        {
+            Console.Error.WriteLine("[VOICE TX] Text contains disallowed characters, rejecting.");
+            return false;
+        }
+
+        // Write text and path to temp files so they are never interpolated into script code
+        var textFile = Path.Combine(Path.GetTempPath(), $"smartsdr_tts_text_{Guid.NewGuid():N}.txt");
+        var pathFile = Path.Combine(Path.GetTempPath(), $"smartsdr_tts_path_{Guid.NewGuid():N}.txt");
         var psPath = Path.Combine(Path.GetTempPath(), $"smartsdr_tts_{Guid.NewGuid():N}.ps1");
         try
         {
-            var escapedText = text.Replace("'", "''");
-            var escapedPath = wavPath.Replace("\\", "\\\\");
+            await File.WriteAllTextAsync(textFile, text);
+            await File.WriteAllTextAsync(pathFile, wavPath);
+
+            // Script reads text and output path from temp files — no user input is interpolated into code.
+            // The temp file paths are internally generated (Guid-based) and safe to embed.
             var script = $@"
 Add-Type -AssemblyName System.Speech
+$wavPath = (Get-Content -LiteralPath '{pathFile.Replace("'", "''")}' -Raw).Trim()
+$text = (Get-Content -LiteralPath '{textFile.Replace("'", "''")}' -Raw).Trim()
 $s = New-Object System.Speech.Synthesis.SpeechSynthesizer
 $s.SelectVoice('{Voice}')
 $s.Rate = 5
 $fmt = New-Object System.Speech.AudioFormat.SpeechAudioFormatInfo({TtsSampleRate}, [System.Speech.AudioFormat.AudioBitsPerSample]::Sixteen, [System.Speech.AudioFormat.AudioChannel]::Mono)
-$s.SetOutputToWaveFile('{escapedPath}', $fmt)
-$s.Speak('{escapedText}')
+$s.SetOutputToWaveFile($wavPath, $fmt)
+$s.Speak($text)
 $s.Dispose()
 ";
             await File.WriteAllTextAsync(psPath, script);
@@ -207,6 +236,8 @@ $s.Dispose()
         finally
         {
             try { File.Delete(psPath); } catch { }
+            try { File.Delete(textFile); } catch { }
+            try { File.Delete(pathFile); } catch { }
         }
     }
 

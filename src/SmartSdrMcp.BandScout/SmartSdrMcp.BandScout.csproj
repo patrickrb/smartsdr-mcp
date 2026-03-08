@@ -1,10 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
-    <ProjectReference Include="..\SmartSdrMcp.Audio\SmartSdrMcp.Audio.csproj" />
-    <ProjectReference Include="..\SmartSdrMcp.Ssb\SmartSdrMcp.Ssb.csproj" />
     <ProjectReference Include="..\SmartSdrMcp.Radio\SmartSdrMcp.Radio.csproj" />
-    <ProjectReference Include="..\SmartSdrMcp.Tx\SmartSdrMcp.Tx.csproj" />
     <ProjectReference Include="..\..\lib\FlexLib_Core\FlexLib\FlexLib.csproj" />
   </ItemGroup>
 

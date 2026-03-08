@@ -9,6 +9,8 @@
     <ProjectReference Include="..\SmartSdrMcp.Tx\SmartSdrMcp.Tx.csproj" />
     <ProjectReference Include="..\SmartSdrMcp.Ssb\SmartSdrMcp.Ssb.csproj" />
     <ProjectReference Include="..\SmartSdrMcp.Contest\SmartSdrMcp.Contest.csproj" />
+    <ProjectReference Include="..\SmartSdrMcp.BandScout\SmartSdrMcp.BandScout.csproj" />
+    <ProjectReference Include="..\SmartSdrMcp.DxHunter\SmartSdrMcp.DxHunter.csproj" />
   </ItemGroup>
 
   <ItemGroup>

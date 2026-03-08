@@ -31,6 +31,7 @@ public class ContestAgent
     private string _myCallsign = "";
     private string _myName = "";
     private string _myQth = "";
+    private string _apiKey = "";
 
     private ContestStage _stage = ContestStage.Stopped;
     private string? _runningStation;
@@ -77,6 +78,8 @@ public class ContestAgent
             return "ANTHROPIC_API_KEY environment variable is not set. " +
                    "Get an API key at https://console.anthropic.com/settings/keys and set it: " +
                    "export ANTHROPIC_API_KEY=sk-ant-...";
+
+        _apiKey = apiKey;
 
         if (string.IsNullOrWhiteSpace(myCallsign))
             return "Callsign is required. Usage: contest_agent_start(callsign=\"K1AF\")";
@@ -135,11 +138,18 @@ public class ContestAgent
         }
     }
 
+    private const int MaxAudioBufferSize = AudioBufferSize * 4; // Cap at 4x the drain size
+
     private void OnAudioData(float[] samples)
     {
         if (!_running || !_useDirectAudio) return;
         lock (_audioLock)
         {
+            if (_rawAudioBuffer.Count >= MaxAudioBufferSize)
+            {
+                // Discard oldest samples to prevent unbounded growth
+                _rawAudioBuffer.RemoveRange(0, _rawAudioBuffer.Count - AudioBufferSize);
+            }
             _rawAudioBuffer.AddRange(samples);
         }
     }
@@ -655,15 +665,15 @@ public class ContestAgent
     private async Task<SituationAnalysis?> SendAnthropicRequestAsync(Dictionary<string, object> requestObj)
     {
         var httpRequest = new HttpRequestMessage(HttpMethod.Post, AnthropicUrl);
-        httpRequest.Headers.Add("x-api-key", Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY") ?? "");
+        httpRequest.Headers.Add("x-api-key", _apiKey);
         httpRequest.Headers.Add("anthropic-version", "2023-06-01");
         httpRequest.Content = JsonContent.Create(requestObj);
         var response = await AnthropicClient.SendAsync(httpRequest);
         if (!response.IsSuccessStatusCode)
         {
-            var body = await response.Content.ReadAsStringAsync();
-            Console.Error.WriteLine($"[CONTEST] Anthropic API error {response.StatusCode}: {body}");
-            lock (_lock) { LogStatus($"API error {(int)response.StatusCode}: {Truncate(body, 120)}"); }
+            var statusCode = (int)response.StatusCode;
+            Console.Error.WriteLine($"[CONTEST] Anthropic API error {statusCode}");
+            lock (_lock) { LogStatus($"API error {statusCode}. Check ANTHROPIC_API_KEY and network."); }
 
             // Fall back to text mode after 3 consecutive audio failures
             if (_useDirectAudio && ++_audioFailCount >= 3)
