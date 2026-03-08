@@ -178,6 +178,24 @@ public class RadioTools
         return JsonSerializer.Serialize(meters, new JsonSerializerOptions { WriteIndented = true });
     }
 
+    [McpServerTool, Description("Set RIT (Receiver Incremental Tuning). Enable/disable and set offset in Hz.")]
+    public string SetRit(bool? enabled = null, int? offsetHz = null)
+    {
+        if (!_radioManager.IsConnected)
+            return "Not connected to a radio.";
+        bool ok = _radioManager.SetRit(enabled, offsetHz);
+        return ok ? $"RIT set: enabled={enabled?.ToString() ?? "unchanged"}, offset={offsetHz?.ToString() ?? "unchanged"} Hz" : "No active slice.";
+    }
+
+    [McpServerTool, Description("Set XIT (Transmitter Incremental Tuning). Enable/disable and set offset in Hz.")]
+    public string SetXit(bool? enabled = null, int? offsetHz = null)
+    {
+        if (!_radioManager.IsConnected)
+            return "Not connected to a radio.";
+        bool ok = _radioManager.SetXit(enabled, offsetHz);
+        return ok ? $"XIT set: enabled={enabled?.ToString() ?? "unchanged"}, offset={offsetHz?.ToString() ?? "unchanged"} Hz" : "No active slice.";
+    }
+
     [McpServerTool, Description("Set CW profile values in one operation. All params optional: wpm, pitch, breakIn, iambic.")]
     public string SetCwProfile(int? wpm = null, int? pitch = null, bool? breakIn = null, string? iambic = null)
     {

@@ -148,6 +148,24 @@ public class RadioManager : IDisposable
         return true;
     }
 
+    public bool SetRit(bool? enabled, int? offsetHz)
+    {
+        var slice = GetActiveSlice();
+        if (slice == null) return false;
+        if (enabled.HasValue) slice.RITOn = enabled.Value;
+        if (offsetHz.HasValue) slice.RITFreq = offsetHz.Value;
+        return true;
+    }
+
+    public bool SetXit(bool? enabled, int? offsetHz)
+    {
+        var slice = GetActiveSlice();
+        if (slice == null) return false;
+        if (enabled.HasValue) slice.XITOn = enabled.Value;
+        if (offsetHz.HasValue) slice.XITFreq = offsetHz.Value;
+        return true;
+    }
+
     public bool StepFrequency(int stepHz, out double newFrequencyMHz)
     {
         newFrequencyMHz = 0;
