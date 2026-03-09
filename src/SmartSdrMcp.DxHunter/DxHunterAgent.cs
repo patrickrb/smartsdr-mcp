@@ -1,13 +1,22 @@
+using SmartSdrMcp.Ai;
 using SmartSdrMcp.BandScout;
+using SmartSdrMcp.Cw;
 using SmartSdrMcp.Radio;
+using SmartSdrMcp.Ssb;
 
 namespace SmartSdrMcp.DxHunter;
 
 public class DxHunterAgent
 {
     private readonly RadioManager _radioManager;
+    private readonly CwPipeline? _cwPipeline;
+    private readonly CwAiRescorer? _aiRescorer;
+    private readonly SsbPipeline? _ssbPipeline;
     private readonly object _lock = new();
     private readonly List<string> _statusLog = new();
+    private readonly List<ListenResult> _listenResults = new();
+    private const int MaxListenResults = 50;
+    private int _listenDurationSeconds = 15;
 
     // Worked log: set of "ENTITY|BAND" and "ENTITY|BAND|MODE" keys
     private readonly HashSet<string> _workedEntityBand = new(StringComparer.OrdinalIgnoreCase);
@@ -21,6 +30,7 @@ public class DxHunterAgent
     private const int MaxAlerts = 100;
     private const int MaxStatusLog = 50;
     private const int PollIntervalMs = 10_000; // 10 seconds
+    private readonly HashSet<string> _listenedAlerts = new(StringComparer.OrdinalIgnoreCase); // track what we've already listened to
 
     private Thread? _hunterThread;
     private volatile bool _running;
@@ -28,12 +38,16 @@ public class DxHunterAgent
     private string _targetBand = ""; // empty = all bands
     private string _targetMode = ""; // empty = all modes
     private bool _autoTune;
+    private string _currentBand = ""; // track band for ATU tune on change
 
     public bool IsRunning => _running;
 
-    public DxHunterAgent(RadioManager radioManager)
+    public DxHunterAgent(RadioManager radioManager, CwPipeline? cwPipeline = null, CwAiRescorer? aiRescorer = null, SsbPipeline? ssbPipeline = null)
     {
         _radioManager = radioManager;
+        _cwPipeline = cwPipeline;
+        _aiRescorer = aiRescorer;
+        _ssbPipeline = ssbPipeline;
     }
 
     // Allowed file extensions for log files
@@ -111,7 +125,7 @@ public class DxHunterAgent
     /// <summary>
     /// Start the DX Hunter agent.
     /// </summary>
-    public string Start(string? band = null, string? mode = null, bool autoTune = false)
+    public string Start(string? band = null, string? mode = null, bool autoTune = false, int listenSeconds = 15)
     {
         if (_running) return "DX Hunter is already running.";
         if (!_radioManager.IsConnected) return "Not connected to a radio.";
@@ -122,6 +136,7 @@ public class DxHunterAgent
         _targetBand = band?.Trim() ?? "";
         _targetMode = mode?.Trim().ToUpperInvariant() ?? "";
         _autoTune = autoTune;
+        _listenDurationSeconds = Math.Clamp(listenSeconds, 5, 60);
         _running = true;
         _startedUtc = DateTime.UtcNow;
 
@@ -130,9 +145,12 @@ public class DxHunterAgent
             _statusLog.Clear();
             _alerts.Clear();
             _alertedCallsigns.Clear();
+            _listenResults.Clear();
+            _listenedAlerts.Clear();
             var bandInfo = string.IsNullOrEmpty(_targetBand) ? "all bands" : _targetBand;
             var modeInfo = string.IsNullOrEmpty(_targetMode) ? "all modes" : _targetMode;
-            LogStatus($"DX Hunter started. Watching {bandInfo}, {modeInfo}. AutoTune={autoTune}.");
+            var listenInfo = autoTune && _cwPipeline != null ? $", Listen={_listenDurationSeconds}s" : "";
+            LogStatus($"DX Hunter started. Watching {bandInfo}, {modeInfo}. AutoTune={autoTune}{listenInfo}.");
         }
 
         // Immediate scan
@@ -172,7 +190,19 @@ public class DxHunterAgent
                 AutoTune: _autoTune,
                 Alerts: _alerts.OrderByDescending(a => a.DetectedUtc).Take(20).ToList(),
                 TotalAlerts: _alerts.Count,
+                ListenResults: _listenResults.OrderByDescending(r => r.ListenedUtc).Take(10).ToList(),
                 StatusLog: _statusLog.ToList());
+        }
+    }
+
+    /// <summary>
+    /// Get recent listen results from active hunting.
+    /// </summary>
+    public List<ListenResult> GetListenResults()
+    {
+        lock (_lock)
+        {
+            return _listenResults.OrderByDescending(r => r.ListenedUtc).ToList();
         }
     }
 
@@ -263,17 +293,74 @@ public class DxHunterAgent
     {
         while (_running)
         {
-            Thread.Sleep(PollIntervalMs);
-            if (!_running) break;
-
             try
             {
+                // Scan for new spots/needs
                 ScanSpots();
+
+                // If autoTune, cycle through alerts and listen to each one
+                if (_autoTune && _running)
+                {
+                    var next = GetNextUnlistenedAlert();
+                    if (next != null)
+                    {
+                        TuneAndListen(next);
+                    }
+                    else
+                    {
+                        // All alerts listened to — wait for new spots
+                        Thread.Sleep(PollIntervalMs);
+                    }
+                }
+                else
+                {
+                    Thread.Sleep(PollIntervalMs);
+                }
             }
             catch (Exception ex)
             {
                 lock (_lock) { LogStatus($"Error: {ex.Message}"); }
+                Thread.Sleep(PollIntervalMs);
             }
+
+            if (!_running) break;
+        }
+    }
+
+    // Band priority order for cycling (lower bands first, best propagation windows)
+    private static readonly string[] BandOrder =
+        ["160m", "80m", "60m", "40m", "30m", "20m", "17m", "15m", "12m", "10m", "6m"];
+
+    private static int BandSortKey(string band)
+    {
+        var idx = Array.IndexOf(BandOrder, band);
+        return idx >= 0 ? idx : 999;
+    }
+
+    private DxAlert? GetNextUnlistenedAlert()
+    {
+        lock (_lock)
+        {
+            if (_alerts.Count == 0) return null;
+
+            // Group by band, prioritize current band first to minimize tuning,
+            // then sort remaining bands in order
+            var unlistened = _alerts
+                .Where(a => !_listenedAlerts.Contains($"{a.Callsign}|{a.Band}"))
+                .OrderBy(a => a.Band.Equals(_currentBand, StringComparison.OrdinalIgnoreCase) ? 0 : 1)
+                .ThenBy(a => BandSortKey(a.Band))
+                .ThenByDescending(a => a.Priority)
+                .FirstOrDefault();
+
+            if (unlistened != null)
+            {
+                _listenedAlerts.Add($"{unlistened.Callsign}|{unlistened.Band}");
+                return unlistened;
+            }
+
+            // All listened — reset and start over
+            _listenedAlerts.Clear();
+            return null; // pause one cycle before restarting
         }
     }
 
@@ -298,16 +385,27 @@ public class DxHunterAgent
             var band = BandScout.BandScoutMonitor.FrequencyToBand(freq);
             if (band == "OOB") continue;
 
+            // Skip FT8/FT4 spots — we can't decode those
+            if (IsFt8Frequency(freq) || IsFt8Mode(mode, comment)) continue;
+
             // Filter by target band/mode
             if (!string.IsNullOrEmpty(_targetBand) &&
                 !band.Equals(_targetBand, StringComparison.OrdinalIgnoreCase))
                 continue;
 
-            // If a target mode is set, exclude spots with missing or non-matching mode
-            if (!string.IsNullOrEmpty(_targetMode) &&
-                (string.IsNullOrEmpty(mode) ||
-                 !mode.Equals(_targetMode, StringComparison.OrdinalIgnoreCase)))
-                continue;
+            // If a target mode is set, check mode field AND comment for mode keywords
+            if (!string.IsNullOrEmpty(_targetMode))
+            {
+                bool modeMatch = (!string.IsNullOrEmpty(mode) &&
+                    mode.Equals(_targetMode, StringComparison.OrdinalIgnoreCase));
+                // Also check comment for mode keywords (cluster spots often put mode in comment)
+                if (!modeMatch && !string.IsNullOrEmpty(comment))
+                    modeMatch = comment.Contains(_targetMode, StringComparison.OrdinalIgnoreCase);
+                // Also infer CW from frequency (below x.060 on most bands is CW)
+                if (!modeMatch && _targetMode.Equals("CW", StringComparison.OrdinalIgnoreCase))
+                    modeMatch = IsCwFrequency(freq);
+                if (!modeMatch) continue;
+            }
 
             var entity = DxccLookup.GetEntity(callsign);
             if (entity == "Unknown") continue;
@@ -359,13 +457,211 @@ public class DxHunterAgent
             {
                 LogStatus($"Found {newNeeds} new needs! Total alerts: {_alerts.Count}");
             }
+        }
+    }
 
-            // Auto-tune to highest priority if enabled
-            if (_autoTune && newNeeds > 0)
+    /// <summary>
+    /// Tune to a specific DX alert and listen with the appropriate decoder (CW or SSB).
+    /// </summary>
+    private void TuneAndListen(DxAlert best)
+    {
+        // Check if we're changing bands — need TUNE
+        var spotBand = BandScout.BandScoutMonitor.FrequencyToBand(best.FrequencyMHz);
+        bool bandChanged = !string.IsNullOrEmpty(_currentBand) &&
+                           !spotBand.Equals(_currentBand, StringComparison.OrdinalIgnoreCase) &&
+                           spotBand != "OOB";
+
+        // Tune to the spot
+        var (success, message) = _radioManager.TuneToSpot(best.Callsign);
+        if (!success)
+        {
+            lock (_lock) { LogStatus($"AutoTune failed for {best.Callsign}: {message}"); }
+            return;
+        }
+
+        // Set the correct mode for this spot
+        bool isCw = IsCwSpot(best);
+        if (isCw)
+        {
+            _radioManager.SetMode("CW");
+        }
+        else
+        {
+            // SSB: USB above 10 MHz, LSB below (ham convention)
+            _radioManager.SetMode(best.FrequencyMHz >= 10.0 ? "USB" : "LSB");
+        }
+
+        // TUNE carrier if band changed — keys TX at 5W, watches SWR until it stabilizes
+        if (bandChanged && spotBand != "OOB")
+        {
+            lock (_lock) { LogStatus($"Band change: {_currentBand} → {spotBand} — TUNE at 5W..."); }
+            _currentBand = spotBand;
+
+            // Set tune power to 5W, then key the TUNE carrier
+            _radioManager.SetRfPower(rfPower: null, tunePower: 5);
+            _radioManager.SetTx(mox: null, txTune: true, txMonitor: null, txInhibit: null);
+
+            // Wait for SWR to stabilize (< 2.0) or timeout at 10s
+            var tuneResult = WaitForSwrStable(maxWaitMs: 10_000, targetSwr: 2.0, stableReadings: 3);
+
+            if (!_running)
             {
-                var msg = TuneToNext();
-                lock (_lock) { LogStatus($"AutoTune: {msg}"); }
+                _radioManager.SetTx(mox: null, txTune: false, txMonitor: null, txInhibit: null);
+                return;
             }
+
+            // Stop TUNE
+            _radioManager.SetTx(mox: null, txTune: false, txMonitor: null, txInhibit: null);
+            Thread.Sleep(300); // brief settle time
+            lock (_lock) { LogStatus(tuneResult); }
+        }
+        else if (spotBand != "OOB")
+        {
+            _currentBand = spotBand;
+        }
+
+        string decodeMode = isCw ? "CW" : "SSB";
+
+        lock (_lock)
+        {
+            LogStatus($"Tuned to {best.Callsign} ({best.Entity}) on {best.Band} at {best.FrequencyMHz:F3} MHz — {decodeMode} listening for {_listenDurationSeconds}s...");
+        }
+
+        if (isCw)
+            ListenCw(best);
+        else
+            ListenSsb(best);
+    }
+
+    private bool IsCwSpot(DxAlert alert)
+    {
+        // Check explicit mode
+        if (!string.IsNullOrEmpty(alert.Mode))
+        {
+            if (alert.Mode.Equals("CW", StringComparison.OrdinalIgnoreCase))
+                return true;
+            if (alert.Mode.Equals("SSB", StringComparison.OrdinalIgnoreCase) ||
+                alert.Mode.Equals("LSB", StringComparison.OrdinalIgnoreCase) ||
+                alert.Mode.Equals("USB", StringComparison.OrdinalIgnoreCase))
+                return false;
+        }
+        // Check comment for mode hints
+        if (!string.IsNullOrEmpty(alert.Comment))
+        {
+            if (alert.Comment.Contains("CW", StringComparison.OrdinalIgnoreCase))
+                return true;
+            if (alert.Comment.Contains("SSB", StringComparison.OrdinalIgnoreCase))
+                return false;
+        }
+        // Infer from frequency
+        return IsCwFrequency(alert.FrequencyMHz);
+    }
+
+    private void ListenCw(DxAlert spot)
+    {
+        if (_cwPipeline == null)
+        {
+            lock (_lock) { LogStatus($"No CW decoder available for {spot.Callsign}"); }
+            return;
+        }
+
+        _cwPipeline.ClearLiveText();
+        bool weStartedCw = false;
+        if (!_cwPipeline.IsRunning)
+        {
+            _cwPipeline.Start();
+            weStartedCw = true;
+        }
+
+        Thread.Sleep(_listenDurationSeconds * 1000);
+        if (!_running) return;
+
+        var rawText = _cwPipeline.GetLiveText();
+        var chars = _cwPipeline.GetRecentCharacters();
+
+        string correctedText = rawText;
+        bool aiApplied = false;
+        if (_aiRescorer != null && !string.IsNullOrWhiteSpace(rawText) && rawText.Trim().Length >= 3)
+        {
+            try
+            {
+                var result = _aiRescorer.RescoreAsync(rawText, chars).GetAwaiter().GetResult();
+                if (result.AiApplied)
+                {
+                    correctedText = result.CorrectedText;
+                    aiApplied = true;
+                }
+            }
+            catch (Exception ex)
+            {
+                lock (_lock) { LogStatus($"AI rescore error: {ex.Message}"); }
+            }
+        }
+
+        RecordListenResult(spot, "CW", rawText, correctedText, aiApplied);
+
+        if (weStartedCw)
+            _cwPipeline.Stop();
+    }
+
+    private void ListenSsb(DxAlert spot)
+    {
+        if (_ssbPipeline == null)
+        {
+            lock (_lock) { LogStatus($"No SSB decoder available for {spot.Callsign}"); }
+            return;
+        }
+
+        _ssbPipeline.ClearLiveText();
+        bool weStartedSsb = false;
+        if (!_ssbPipeline.IsRunning)
+        {
+            var startResult = _ssbPipeline.Start();
+            if (startResult != "ok")
+            {
+                lock (_lock) { LogStatus($"SSB start failed for {spot.Callsign}: {startResult}"); }
+                return;
+            }
+            weStartedSsb = true;
+        }
+
+        Thread.Sleep(_listenDurationSeconds * 1000);
+        if (!_running) return;
+
+        var rawText = _ssbPipeline.GetLiveText();
+        bool signalHeard = !string.IsNullOrWhiteSpace(rawText) && rawText != "(no speech detected)";
+
+        RecordListenResult(spot, "SSB", signalHeard ? rawText : "", rawText, false);
+
+        if (weStartedSsb)
+            _ssbPipeline.Stop();
+    }
+
+    private void RecordListenResult(DxAlert spot, string decodeMode, string rawText, string correctedText, bool aiApplied)
+    {
+        var listenResult = new ListenResult(
+            Callsign: spot.Callsign,
+            Entity: spot.Entity,
+            Band: spot.Band,
+            FrequencyMHz: spot.FrequencyMHz,
+            DecodeMode: decodeMode,
+            RawDecode: rawText,
+            AiCorrected: correctedText,
+            AiApplied: aiApplied,
+            ListenDurationSeconds: _listenDurationSeconds,
+            SignalHeard: !string.IsNullOrWhiteSpace(rawText) && rawText != "(no speech detected)",
+            ListenedUtc: DateTime.UtcNow);
+
+        lock (_lock)
+        {
+            _listenResults.Add(listenResult);
+            if (_listenResults.Count > MaxListenResults)
+                _listenResults.RemoveAt(0);
+
+            if (listenResult.SignalHeard)
+                LogStatus($"HEARD [{decodeMode}] {spot.Callsign}: \"{correctedText.Trim()}\"");
+            else
+                LogStatus($"No signal [{decodeMode}] on {spot.Callsign} ({spot.FrequencyMHz:F3} MHz)");
         }
     }
 
@@ -377,6 +673,97 @@ public class DxHunterAgent
             _statusLog.RemoveAt(0);
         Console.Error.WriteLine($"[DXHUNTER] {message}");
     }
+
+    /// <summary>
+    /// Poll SWR meter during TUNE and return once it stabilizes below target or times out.
+    /// </summary>
+    private string WaitForSwrStable(int maxWaitMs, double targetSwr, int stableReadings)
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        int goodCount = 0;
+        double lastSwr = 99.0;
+
+        // Give the tuner a moment to start
+        Thread.Sleep(500);
+
+        while (sw.ElapsedMilliseconds < maxWaitMs && _running)
+        {
+            var meters = _radioManager.GetMeters();
+            if (meters.TryGetValue("SWR", out var swrObj) && swrObj is double swr && swr > 0)
+            {
+                lastSwr = swr;
+                if (swr <= targetSwr)
+                {
+                    goodCount++;
+                    if (goodCount >= stableReadings)
+                    {
+                        return $"TUNE done in {sw.ElapsedMilliseconds / 1000.0:F1}s — SWR {swr:F1}:1";
+                    }
+                }
+                else
+                {
+                    goodCount = 0; // reset if SWR goes back up
+                }
+            }
+
+            Thread.Sleep(250); // poll every 250ms
+        }
+
+        return $"TUNE timeout ({maxWaitMs / 1000}s) — SWR {lastSwr:F1}:1";
+    }
+
+    /// <summary>
+    /// Detect FT8/FT4 from mode or comment fields.
+    /// </summary>
+    private static bool IsFt8Mode(string mode, string comment)
+    {
+        if (!string.IsNullOrEmpty(mode))
+        {
+            if (mode.Equals("FT8", StringComparison.OrdinalIgnoreCase) ||
+                mode.Equals("FT4", StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        if (!string.IsNullOrEmpty(comment))
+        {
+            if (comment.Contains("FT8", StringComparison.OrdinalIgnoreCase) ||
+                comment.Contains("FT4", StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Detect FT8/FT4 from standard dial frequencies.
+    /// </summary>
+    private static bool IsFt8Frequency(double mhz)
+    {
+        // FT8 standard dial frequencies (±2 kHz window)
+        ReadOnlySpan<double> ft8Freqs = [1.840, 3.573, 5.357, 7.074, 10.136, 14.074,
+                                          18.100, 21.074, 24.915, 28.074, 50.313, 50.323];
+        foreach (var f in ft8Freqs)
+        {
+            if (Math.Abs(mhz - f) < 0.003) return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Infer CW mode from frequency — below the CW/digital boundary on each band.
+    /// </summary>
+    private static bool IsCwFrequency(double mhz) => mhz switch
+    {
+        >= 1.800 and < 1.840 => true,
+        >= 3.500 and < 3.570 => true,
+        >= 5.330 and < 5.360 => true,
+        >= 7.000 and < 7.060 => true,
+        >= 10.100 and < 10.130 => true,
+        >= 14.000 and < 14.070 => true,
+        >= 18.068 and < 18.095 => true,
+        >= 21.000 and < 21.070 => true,
+        >= 24.890 and < 24.920 => true,
+        >= 28.000 and < 28.070 => true,
+        _ => false
+    };
 }
 
 // --- Records ---
@@ -392,7 +779,21 @@ public record DxHunterState(
     bool AutoTune,
     List<DxAlert> Alerts,
     int TotalAlerts,
+    List<ListenResult> ListenResults,
     List<string> StatusLog);
+
+public record ListenResult(
+    string Callsign,
+    string Entity,
+    string Band,
+    double FrequencyMHz,
+    string DecodeMode,
+    string RawDecode,
+    string AiCorrected,
+    bool AiApplied,
+    int ListenDurationSeconds,
+    bool SignalHeard,
+    DateTime ListenedUtc);
 
 public record DxAlert(
     string Callsign,

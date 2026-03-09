@@ -783,6 +783,42 @@ public class RadioManager : IDisposable
         return true;
     }
 
+    // --- Add Spot (#30) ---
+
+    public bool AddSpot(string callsign, double frequencyMHz, string? mode = null,
+        string? color = null, string? backgroundColor = null,
+        string? spotterCallsign = null, string? source = null,
+        string? comment = null, int lifetimeSeconds = 600)
+    {
+        var radio = _radio;
+        if (radio == null || !radio.Connected) return false;
+
+        var spot = new Flex.Smoothlake.FlexLib.Spot
+        {
+            Callsign = callsign,
+            RXFrequency = frequencyMHz,
+            LifetimeSeconds = lifetimeSeconds
+        };
+
+        if (mode != null) spot.Mode = mode;
+        if (color != null) spot.Color = color;
+        if (backgroundColor != null) spot.BackgroundColor = backgroundColor;
+        if (spotterCallsign != null) spot.SpotterCallsign = spotterCallsign;
+        if (source != null) spot.Source = source;
+        if (comment != null) spot.Comment = comment;
+        spot.Timestamp = DateTime.UtcNow;
+
+        radio.RequestSpot(spot);
+        return true;
+    }
+
+    public void ClearAllSpots()
+    {
+        var radio = _radio;
+        if (radio == null || !radio.Connected) return;
+        radio.ClearAllSpots();
+    }
+
     // --- Tune to Spot (#29) ---
 
     public (bool Success, string Message) TuneToSpot(string callsign)

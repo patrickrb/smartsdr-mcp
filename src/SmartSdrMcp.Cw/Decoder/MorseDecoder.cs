@@ -9,6 +9,7 @@ public class MorseDecoder
 {
     private readonly WpmEstimator _wpmEstimator;
     private readonly List<MorseElement> _currentPattern = new();
+    private readonly List<SymbolCandidate> _currentCandidates = new();
     private string _currentDitDah = "";
     private DateTime _lastKeyUpTime = DateTime.UtcNow;
     private bool _inCharacter;
@@ -50,6 +51,7 @@ public class MorseDecoder
             }
 
             _currentPattern.Add(symbol.Element);
+            _currentCandidates.Add(symbol);
             _inCharacter = true;
             _lastKeyUpTime = keyEvent.EndTime;
 
@@ -125,21 +127,91 @@ public class MorseDecoder
         string? decoded = MorseTable.Lookup(_currentDitDah);
         double confidence = decoded != null ? 0.9 : 0.3;
 
+        // Generate N-best alternative characters from ambiguous elements
+        var alternatives = GenerateAlternatives();
+
         CharacterDecoded?.Invoke(new DecodedCharacter(
             _currentDitDah,
             decoded ?? $"?({_currentDitDah})",
             confidence,
-            DateTime.UtcNow));
+            DateTime.UtcNow,
+            alternatives.Count > 0 ? alternatives : null));
 
         _currentDitDah = "";
         _currentPattern.Clear();
+        _currentCandidates.Clear();
         _inCharacter = false;
+    }
+
+    /// <summary>
+    /// Generate alternative character interpretations by flipping ambiguous elements.
+    /// Only considers elements where the alternative confidence > 0.15.
+    /// Returns up to 5 candidates sorted by score.
+    /// </summary>
+    private List<CharacterCandidate> GenerateAlternatives()
+    {
+        if (_currentCandidates.Count == 0) return new();
+
+        // Find ambiguous positions (where alternative is plausible)
+        var ambiguous = new List<int>();
+        for (int i = 0; i < _currentCandidates.Count; i++)
+        {
+            if (_currentCandidates[i].Alternative.HasValue && _currentCandidates[i].AltConfidence > 0.15)
+                ambiguous.Add(i);
+        }
+
+        if (ambiguous.Count == 0) return new();
+
+        // Limit to the 3 most ambiguous positions to keep combinations manageable
+        if (ambiguous.Count > 3)
+        {
+            ambiguous = ambiguous
+                .OrderByDescending(i => _currentCandidates[i].AltConfidence)
+                .Take(3)
+                .ToList();
+        }
+
+        var results = new List<CharacterCandidate>();
+        int combos = 1 << ambiguous.Count;
+
+        for (int mask = 1; mask < combos; mask++)
+        {
+            var pattern = new char[_currentCandidates.Count];
+            double score = 1.0;
+
+            for (int i = 0; i < _currentCandidates.Count; i++)
+            {
+                int ambIdx = ambiguous.IndexOf(i);
+                bool flip = ambIdx >= 0 && (mask & (1 << ambIdx)) != 0;
+
+                if (flip)
+                {
+                    pattern[i] = _currentCandidates[i].Alternative == MorseElement.Dit ? '.' : '-';
+                    score *= _currentCandidates[i].AltConfidence;
+                }
+                else
+                {
+                    pattern[i] = _currentCandidates[i].Element == MorseElement.Dit ? '.' : '-';
+                    score *= _currentCandidates[i].Confidence;
+                }
+            }
+
+            string patternStr = new(pattern);
+            if (patternStr == _currentDitDah) continue;
+
+            string? ch = MorseTable.Lookup(patternStr);
+            if (ch != null)
+                results.Add(new CharacterCandidate(patternStr, ch, score));
+        }
+
+        return results.OrderByDescending(c => c.Score).Take(5).ToList();
     }
 
     public void Reset()
     {
         _currentDitDah = "";
         _currentPattern.Clear();
+        _currentCandidates.Clear();
         _inCharacter = false;
     }
 }
@@ -148,4 +220,5 @@ public record DecodedCharacter(
     string DitDahPattern,
     string Character,
     double Confidence,
-    DateTime Timestamp);
+    DateTime Timestamp,
+    List<CharacterCandidate>? Alternatives = null);

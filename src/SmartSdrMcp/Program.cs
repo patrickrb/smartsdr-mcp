@@ -41,6 +41,14 @@ builder.Services.AddSingleton<QsoTracker>(sp =>
 });
 builder.Services.AddSingleton<ReplyGenerator>(_ =>
     new ReplyGenerator(MyCallsign, MyName));
+builder.Services.AddSingleton<CwAiRescorer>(sp =>
+{
+    var httpClient = new HttpClient();
+    var apiKey = Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY")
+        ?? throw new InvalidOperationException("ANTHROPIC_API_KEY environment variable is required for CW AI rescoring.");
+    CwAiRescorer.ConfigureHttpClient(httpClient, apiKey);
+    return new CwAiRescorer(httpClient);
+});
 builder.Services.AddSingleton<TransmitController>();
 builder.Services.AddSingleton<SsbPipeline>(sp =>
 {
@@ -59,7 +67,15 @@ builder.Services.AddSingleton<ContestAgent>(sp =>
 builder.Services.AddSingleton<BandScoutMonitor>(sp =>
     new BandScoutMonitor(sp.GetRequiredService<RadioManager>()));
 builder.Services.AddSingleton<DxHunterAgent>(sp =>
-    new DxHunterAgent(sp.GetRequiredService<RadioManager>()));
+    new DxHunterAgent(
+        sp.GetRequiredService<RadioManager>(),
+        sp.GetRequiredService<CwPipeline>(),
+        sp.GetRequiredService<CwAiRescorer>(),
+        sp.GetRequiredService<SsbPipeline>()));
+builder.Services.AddSingleton<DxClusterService>(sp =>
+    new DxClusterService(
+        sp.GetRequiredService<RadioManager>(),
+        sp.GetRequiredService<DxHunterAgent>()));
 
 // MCP Server
 builder.Services.AddMcpServer()
