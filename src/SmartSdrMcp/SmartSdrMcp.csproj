@@ -11,6 +11,7 @@
     <ProjectReference Include="..\SmartSdrMcp.Contest\SmartSdrMcp.Contest.csproj" />
     <ProjectReference Include="..\SmartSdrMcp.BandScout\SmartSdrMcp.BandScout.csproj" />
     <ProjectReference Include="..\SmartSdrMcp.DxHunter\SmartSdrMcp.DxHunter.csproj" />
+    <ProjectReference Include="..\SmartSdrMcp.CqCaller\SmartSdrMcp.CqCaller.csproj" />
     <ProjectReference Include="..\SmartSdrMcp.Mcp\SmartSdrMcp.Mcp.csproj" />
   </ItemGroup>
 
@@ -21,7 +22,7 @@
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net9.0</TargetFramework>
+    <TargetFramework>net9.0-windows</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <NoWarn>$(NoWarn);NU1605</NoWarn>

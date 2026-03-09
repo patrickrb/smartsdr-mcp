@@ -5,6 +5,7 @@ using SmartSdrMcp.Ai;
 using SmartSdrMcp.Audio;
 using SmartSdrMcp.BandScout;
 using SmartSdrMcp.Cw;
+using SmartSdrMcp.CqCaller;
 using SmartSdrMcp.DxHunter;
 using SmartSdrMcp.Mcp.Resources;
 using SmartSdrMcp.Mcp.Tools;
@@ -41,15 +42,16 @@ builder.Services.AddSingleton<QsoTracker>(sp =>
 });
 builder.Services.AddSingleton<ReplyGenerator>(_ =>
     new ReplyGenerator(MyCallsign, MyName));
-builder.Services.AddSingleton<CwAiRescorer?>(sp =>
+var anthropicApiKey = Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY");
+if (!string.IsNullOrWhiteSpace(anthropicApiKey))
 {
-    var apiKey = Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY");
-    if (string.IsNullOrWhiteSpace(apiKey))
-        return null; // AI rescoring disabled — server still works without it
-    var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
-    CwAiRescorer.ConfigureHttpClient(httpClient, apiKey);
-    return new CwAiRescorer(httpClient);
-});
+    builder.Services.AddSingleton(sp =>
+    {
+        var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        CwAiRescorer.ConfigureHttpClient(httpClient, anthropicApiKey);
+        return new CwAiRescorer(httpClient);
+    });
+}
 builder.Services.AddSingleton<TransmitController>();
 builder.Services.AddSingleton<SsbPipeline>(sp =>
 {
@@ -78,6 +80,14 @@ builder.Services.AddSingleton<DxClusterService>(sp =>
     new DxClusterService(
         sp.GetRequiredService<RadioManager>(),
         sp.GetRequiredService<DxHunterAgent>()));
+builder.Services.AddSingleton<CqCallerAgent>(sp =>
+    new CqCallerAgent(
+        sp.GetRequiredService<RadioManager>(),
+        sp.GetRequiredService<CwPipeline>(),
+        sp.GetRequiredService<AudioPipeline>(),
+        sp.GetRequiredService<TransmitController>(),
+        sp.GetRequiredService<SsbPipeline>(),
+        sp.GetService<CwAiRescorer>()));
 
 // MCP Server
 builder.Services.AddMcpServer()
@@ -89,6 +99,7 @@ builder.Services.AddMcpServer()
     .WithTools<ContestTools>()
     .WithTools<BandScoutTools>()
     .WithTools<DxHunterTools>()
+    .WithTools<CqCallerTools>()
     .WithResources<RadioStateResource>()
     .WithResources<CwLiveResource>()
     .WithResources<CwRecentResource>()

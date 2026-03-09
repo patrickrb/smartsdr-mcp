@@ -1,6 +1,5 @@
 using System.Diagnostics;
-
-using Flex.Smoothlake.FlexLib;
+using NAudio.Wave;
 using SmartSdrMcp.Radio;
 
 namespace SmartSdrMcp.Contest;
@@ -8,11 +7,8 @@ namespace SmartSdrMcp.Contest;
 public class VoiceTransmitter
 {
     private readonly RadioManager _radioManager;
-    private const int DaxSampleRate = 24000;
-    private const int TtsSampleRate = 48000; // Generate at native SAPI rate, downsample to DAX
-    private const int SamplesPerPacket = 128;
+    private const int TtsSampleRate = 48000;
     private const string Voice = "Microsoft Zira Desktop";
-    private const float AudioScale = 0.25f; // Prevent SSB clipping
 
     public VoiceTransmitter(RadioManager radioManager)
     {
@@ -22,17 +18,29 @@ public class VoiceTransmitter
     /// <summary>Send a 1kHz sine wave for 2 seconds to test DAX TX audio path.</summary>
     public async Task<(bool Success, string Message)> SendToneAsync()
     {
-        var radio = _radioManager.Radio;
-        if (radio == null || !radio.Connected)
-            return (false, "Radio not connected");
+        // Generate 2s of 1kHz sine at 48kHz, save as WAV, play through DAX TX
+        var wavPath = Path.Combine(Path.GetTempPath(), $"smartsdr_tone_{Guid.NewGuid():N}.wav");
+        try
+        {
+            const int sampleRate = 48000;
+            const int durationSec = 2;
+            int numSamples = sampleRate * durationSec;
 
-        // Generate 2s of 1kHz sine at DaxSampleRate
-        int numSamples = DaxSampleRate * 2;
-        var samples = new float[numSamples];
-        for (int i = 0; i < numSamples; i++)
-            samples[i] = (float)Math.Sin(2.0 * Math.PI * 1000.0 * i / DaxSampleRate);
+            using (var writer = new WaveFileWriter(wavPath, new WaveFormat(sampleRate, 16, 1)))
+            {
+                for (int i = 0; i < numSamples; i++)
+                {
+                    float sample = (float)Math.Sin(2.0 * Math.PI * 1000.0 * i / sampleRate) * 0.5f;
+                    writer.WriteSample(sample);
+                }
+            }
 
-        return await StreamToRadio(radio, samples, "1kHz tone (2s)");
+            return await PlayThroughDaxTx(wavPath, "1kHz tone (2s)");
+        }
+        finally
+        {
+            try { File.Delete(wavPath); } catch { }
+        }
     }
 
     public async Task<(bool Success, string Message)> SpeakAsync(string text)
@@ -40,6 +48,13 @@ public class VoiceTransmitter
         var radio = _radioManager.Radio;
         if (radio == null || !radio.Connected)
             return (false, "Radio not connected");
+
+        // Verify frequency is within amateur bands before transmitting
+        var state = _radioManager.GetState();
+        var safety = new SmartSdrMcp.Tx.TransmitSafety();
+        var freqCheck = safety.CheckTransmitAllowed(state.FrequencyMHz);
+        if (!freqCheck.Allowed)
+            return (false, $"TX blocked: {freqCheck.Reason}");
 
         // Generate WAV via Windows SAPI
         var wavPath = Path.Combine(Path.GetTempPath(), $"smartsdr_tts_{Guid.NewGuid():N}.wav");
@@ -49,16 +64,9 @@ public class VoiceTransmitter
             if (!generated)
                 return (false, "TTS generation failed");
 
-            // Load and convert audio
-            var samples = LoadAndConvert(wavPath);
-            if (samples == null || samples.Length == 0)
-                return (false, "Failed to load TTS audio");
+            Console.Error.WriteLine($"[VOICE TX] TTS WAV generated: {wavPath}");
 
-            // Save debug WAV so operator can compare DAX TX vs raw audio
-            SaveDebugWav(samples, Path.Combine(Path.GetTempPath(), "smartsdr_tts_debug.wav"));
-            Console.Error.WriteLine($"[VOICE TX] Debug WAV saved to {Path.Combine(Path.GetTempPath(), "smartsdr_tts_debug.wav")}");
-
-            return await StreamToRadio(radio, samples, $"Transmitted: {text}");
+            return await PlayThroughDaxTx(wavPath, $"Transmitted: {text}");
         }
         finally
         {
@@ -66,83 +74,46 @@ public class VoiceTransmitter
         }
     }
 
-    private async Task<(bool Success, string Message)> StreamToRadio(Flex.Smoothlake.FlexLib.Radio radio, float[] samples, string successMessage)
+    private async Task<(bool Success, string Message)> PlayThroughDaxTx(string wavPath, string successMessage)
     {
-        // Verify frequency is within amateur bands before keying MOX
-        var state = _radioManager.GetState();
-        var safety = new SmartSdrMcp.Tx.TransmitSafety();
-        var freqCheck = safety.CheckTransmitAllowed(state.FrequencyMHz);
-        if (!freqCheck.Allowed)
-            return (false, $"TX blocked: {freqCheck.Reason}");
+        // Find the DAX TX virtual audio device
+        int daxDeviceId = FindDaxTxDevice();
+        if (daxDeviceId < 0)
+            return (false, "DAX TX audio device not found. Ensure SmartSDR DAX is running.");
 
-        // Get or create DAX TX stream
-        DAXTXAudioStream? txStream = null;
-        var tcs = new TaskCompletionSource<DAXTXAudioStream>();
+        var deviceCaps = WaveOut.GetCapabilities(daxDeviceId);
+        Console.Error.WriteLine($"[VOICE TX] Using DAX TX device: {deviceCaps.ProductName} (id={daxDeviceId})");
 
-        void onAdded(DAXTXAudioStream s) => tcs.TrySetResult(s);
+        var radio = _radioManager.Radio;
+        if (radio == null || !radio.Connected)
+            return (false, "Radio not connected");
 
-        lock (radio)
-        {
-            var field = radio.GetType().GetField("_daxTXAudioStreams",
-                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-            if (field?.GetValue(radio) is List<DAXTXAudioStream> streams && streams.Count > 0)
-                txStream = streams[0];
-        }
-
-        if (txStream == null)
-        {
-            radio.DAXTXAudioStreamAdded += onAdded;
-            radio.RequestDAXTXAudioStream();
-            var completed = await Task.WhenAny(tcs.Task, Task.Delay(5000));
-            radio.DAXTXAudioStreamAdded -= onAdded;
-            if (completed != tcs.Task)
-                return (false, "Timeout waiting for DAX TX audio stream");
-            txStream = tcs.Task.Result;
-        }
-
+        // Key MOX
         radio.Mox = true;
-        var txReady = SpinWait.SpinUntil(() => txStream.Transmit, TimeSpan.FromMilliseconds(2000));
-        if (!txReady)
-        {
-            radio.Mox = false;
-            return (false, "Timeout waiting for TX stream to become active");
-        }
-
-        await Task.Delay(200); // TX relay settling
+        await Task.Delay(300); // TX relay settling
 
         try
         {
-            var packets = BuildPackets(samples);
-            Console.Error.WriteLine($"[VOICE TX] Sending {packets.Count} packets ({samples.Length} samples, {samples.Length / (double)DaxSampleRate:F2}s)");
-
-            // Pacing: send each packet slightly before its playback time.
-            // Too much lead overflows the radio's buffer; too little causes
-            // underruns. 30ms (~5 packets) is a small cushion that absorbs
-            // OS scheduling jitter without overflowing.
-            const double usPerPacket = 1_000_000.0 * SamplesPerPacket / DaxSampleRate;
-            const double leadTimeUs = 30_000; // stay up to 30ms ahead
-            var sw = Stopwatch.StartNew();
-
-            for (int i = 0; i < packets.Count; i++)
+            using var reader = new AudioFileReader(wavPath);
+            using var waveOut = new WaveOutEvent
             {
-                double dueUs = i * usPerPacket;
-                while (sw.Elapsed.TotalMicroseconds < dueUs - leadTimeUs)
-                    Thread.SpinWait(10);
-                txStream.AddTXData(packets[i]);
-            }
+                DeviceNumber = daxDeviceId,
+                DesiredLatency = 100
+            };
 
-            var silence = new float[SamplesPerPacket * 2];
-            for (int i = 0; i < 10; i++)
-            {
-                double dueUs = (packets.Count + i) * usPerPacket;
-                while (sw.Elapsed.TotalMicroseconds < dueUs - leadTimeUs)
-                    Thread.SpinWait(10);
-                txStream.AddTXData(silence);
-            }
+            var tcs = new TaskCompletionSource<bool>();
+            waveOut.PlaybackStopped += (_, _) => tcs.TrySetResult(true);
 
-            double totalUs = (packets.Count + 10) * usPerPacket;
-            while (sw.Elapsed.TotalMicroseconds < totalUs)
-                Thread.SpinWait(100);
+            waveOut.Init(reader);
+            waveOut.Play();
+
+            Console.Error.WriteLine($"[VOICE TX] Playing {reader.TotalTime.TotalSeconds:F1}s audio through DAX TX");
+
+            // Wait for playback to complete or timeout
+            var timeout = Task.Delay(TimeSpan.FromSeconds(reader.TotalTime.TotalSeconds + 5));
+            await Task.WhenAny(tcs.Task, timeout);
+
+            waveOut.Stop();
         }
         finally
         {
@@ -152,28 +123,22 @@ public class VoiceTransmitter
         return (true, successMessage);
     }
 
-    private static List<float[]> BuildPackets(float[] samples)
+    private static int FindDaxTxDevice()
     {
-        var packets = new List<float[]>();
-        int offset = 0;
-
-        while (offset < samples.Length)
+        for (int i = 0; i < WaveOut.DeviceCount; i++)
         {
-            var packet = new float[SamplesPerPacket * 2];
-            int count = Math.Min(SamplesPerPacket, samples.Length - offset);
+            var caps = WaveOut.GetCapabilities(i);
+            Console.Error.WriteLine($"[VOICE TX] Audio device {i}: {caps.ProductName}");
 
-            for (int i = 0; i < count; i++)
+            if (caps.ProductName.Contains("DAX TX", StringComparison.OrdinalIgnoreCase) ||
+                caps.ProductName.Contains("FlexRadio", StringComparison.OrdinalIgnoreCase) &&
+                caps.ProductName.Contains("TX", StringComparison.OrdinalIgnoreCase))
             {
-                float s = samples[offset + i] * AudioScale;
-                packet[i * 2] = s;       // Left
-                packet[i * 2 + 1] = s;   // Right
+                return i;
             }
-
-            packets.Add(packet);
-            offset += count;
         }
 
-        return packets;
+        return -1;
     }
 
     // Allowed characters for TTS text: letters, digits, spaces, basic punctuation.
@@ -203,14 +168,13 @@ public class VoiceTransmitter
             await File.WriteAllTextAsync(pathFile, wavPath);
 
             // Script reads text and output path from temp files — no user input is interpolated into code.
-            // The temp file paths are internally generated (Guid-based) and safe to embed.
             var script = $@"
 Add-Type -AssemblyName System.Speech
 $wavPath = (Get-Content -LiteralPath '{pathFile.Replace("'", "''")}' -Raw).Trim()
 $text = (Get-Content -LiteralPath '{textFile.Replace("'", "''")}' -Raw).Trim()
 $s = New-Object System.Speech.Synthesis.SpeechSynthesizer
 $s.SelectVoice('{Voice}')
-$s.Rate = 5
+$s.Rate = 1
 $fmt = New-Object System.Speech.AudioFormat.SpeechAudioFormatInfo({TtsSampleRate}, [System.Speech.AudioFormat.AudioBitsPerSample]::Sixteen, [System.Speech.AudioFormat.AudioChannel]::Mono)
 $s.SetOutputToWaveFile($wavPath, $fmt)
 $s.Speak($text)
@@ -238,130 +202,6 @@ $s.Dispose()
             try { File.Delete(psPath); } catch { }
             try { File.Delete(textFile); } catch { }
             try { File.Delete(pathFile); } catch { }
-        }
-    }
-
-    private static float[]? LoadAndConvert(string wavPath)
-    {
-        try
-        {
-            using var fs = File.OpenRead(wavPath);
-            using var br = new BinaryReader(fs);
-
-            // Parse WAV header
-            var riff = new string(br.ReadChars(4));
-            if (riff != "RIFF") return null;
-            br.ReadInt32(); // file size
-            var wave = new string(br.ReadChars(4));
-            if (wave != "WAVE") return null;
-
-            int sampleRate = 0;
-            int bitsPerSample = 0;
-            int channels = 0;
-            float[]? rawSamples = null;
-
-            while (fs.Position < fs.Length)
-            {
-                var chunkId = new string(br.ReadChars(4));
-                int chunkSize = br.ReadInt32();
-
-                if (chunkId == "fmt ")
-                {
-                    br.ReadInt16(); // audio format
-                    channels = br.ReadInt16();
-                    sampleRate = br.ReadInt32();
-                    br.ReadInt32(); // byte rate
-                    br.ReadInt16(); // block align
-                    bitsPerSample = br.ReadInt16();
-                    if (chunkSize > 16)
-                        br.ReadBytes(chunkSize - 16);
-                }
-                else if (chunkId == "data")
-                {
-                    int numSamples = chunkSize / (bitsPerSample / 8) / channels;
-                    rawSamples = new float[numSamples];
-
-                    for (int i = 0; i < numSamples; i++)
-                    {
-                        if (bitsPerSample == 16)
-                        {
-                            short s = br.ReadInt16();
-                            rawSamples[i] = s / 32768f;
-                            // Skip extra channels
-                            for (int c = 1; c < channels; c++)
-                                br.ReadInt16();
-                        }
-                        else
-                        {
-                            break;
-                        }
-                    }
-                }
-                else
-                {
-                    br.ReadBytes(chunkSize);
-                }
-            }
-
-            if (rawSamples == null || sampleRate == 0) return null;
-
-            // Resample to 24kHz
-            if (sampleRate != DaxSampleRate)
-            {
-                double ratio = (double)DaxSampleRate / sampleRate;
-                int newLen = (int)(rawSamples.Length * ratio);
-                var resampled = new float[newLen];
-                for (int i = 0; i < newLen; i++)
-                {
-                    double srcIdx = i / ratio;
-                    int idx0 = (int)srcIdx;
-                    int idx1 = Math.Min(idx0 + 1, rawSamples.Length - 1);
-                    double frac = srcIdx - idx0;
-                    resampled[i] = (float)(rawSamples[idx0] * (1 - frac) + rawSamples[idx1] * frac);
-                }
-                return resampled;
-            }
-
-            return rawSamples;
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"[VOICE TX] WAV load error: {ex.Message}");
-            return null;
-        }
-    }
-
-    private static void SaveDebugWav(float[] samples, string path)
-    {
-        try
-        {
-            using var fs = File.Create(path);
-            using var bw = new BinaryWriter(fs);
-
-            int dataSize = samples.Length * 2; // 16-bit samples
-            bw.Write("RIFF"u8);
-            bw.Write(36 + dataSize);
-            bw.Write("WAVE"u8);
-            bw.Write("fmt "u8);
-            bw.Write(16);           // chunk size
-            bw.Write((short)1);     // PCM
-            bw.Write((short)1);     // mono
-            bw.Write(DaxSampleRate);
-            bw.Write(DaxSampleRate * 2); // byte rate
-            bw.Write((short)2);     // block align
-            bw.Write((short)16);    // bits per sample
-            bw.Write("data"u8);
-            bw.Write(dataSize);
-
-            foreach (var s in samples)
-            {
-                short pcm = (short)(Math.Clamp(s * AudioScale, -1f, 1f) * 32767);
-                bw.Write(pcm);
-            }
-        }
-        catch (Exception ex)
-        {
-            Console.Error.WriteLine($"[VOICE TX] Debug WAV save error: {ex.Message}");
         }
     }
 }

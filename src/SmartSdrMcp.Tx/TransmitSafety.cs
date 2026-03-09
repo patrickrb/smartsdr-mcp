@@ -20,8 +20,17 @@ public class TransmitSafety
 
     public TimeSpan MaxTransmitDuration { get; set; } = TimeSpan.FromSeconds(60);
 
-    public (bool Allowed, string? Reason) CheckTransmitAllowed(double frequencyMHz)
+    public (bool Allowed, string? Reason) CheckTransmitAllowed(double frequencyMHz, LicenseClass? licenseClass = null, string? mode = null)
     {
+        // If license class is provided, use detailed privilege checking
+        if (licenseClass.HasValue && mode != null)
+        {
+            if (!BandPrivileges.IsAllowed(licenseClass.Value, frequencyMHz, mode))
+                return (false, $"Frequency {frequencyMHz:F3} MHz is not allowed for {licenseClass.Value} class in {mode} mode");
+            return (true, null);
+        }
+
+        // Fallback: Extra-class-only band edge check (original behavior)
         bool inBand = false;
         foreach (var (low, high) in AllowedBands)
         {
