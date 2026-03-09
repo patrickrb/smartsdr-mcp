@@ -41,15 +41,16 @@ builder.Services.AddSingleton<QsoTracker>(sp =>
 });
 builder.Services.AddSingleton<ReplyGenerator>(_ =>
     new ReplyGenerator(MyCallsign, MyName));
-builder.Services.AddSingleton<CwAiRescorer?>(sp =>
+var anthropicApiKey = Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY");
+if (!string.IsNullOrWhiteSpace(anthropicApiKey))
 {
-    var apiKey = Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY");
-    if (string.IsNullOrWhiteSpace(apiKey))
-        return null; // AI rescoring disabled — server still works without it
-    var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
-    CwAiRescorer.ConfigureHttpClient(httpClient, apiKey);
-    return new CwAiRescorer(httpClient);
-});
+    builder.Services.AddSingleton<CwAiRescorer>(sp =>
+    {
+        var client = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        CwAiRescorer.ConfigureHttpClient(client, anthropicApiKey);
+        return new CwAiRescorer(client);
+    });
+}
 builder.Services.AddSingleton<TransmitController>();
 builder.Services.AddSingleton<SsbPipeline>(sp =>
 {

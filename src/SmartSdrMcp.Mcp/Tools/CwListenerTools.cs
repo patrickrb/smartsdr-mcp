@@ -19,7 +19,7 @@ public class CwListenerTools
     private readonly CwPipeline _cwPipeline;
     private readonly MessageSegmenter _messageSegmenter;
     private readonly QsoTracker _qsoTracker;
-    private readonly CwAiRescorer _aiRescorer;
+    private readonly CwAiRescorer? _aiRescorer;
 
     public CwListenerTools(
         RadioManager radioManager,
@@ -27,7 +27,7 @@ public class CwListenerTools
         CwPipeline cwPipeline,
         MessageSegmenter messageSegmenter,
         QsoTracker qsoTracker,
-        CwAiRescorer aiRescorer)
+        CwAiRescorer? aiRescorer = null)
     {
         _radioManager = radioManager;
         _audioPipeline = audioPipeline;
@@ -168,6 +168,9 @@ public class CwListenerTools
     [McpServerTool, Description("AI-rescore the current CW decode buffer. Uses Claude to correct dit/dah confusions and apply ham radio context. Requires ANTHROPIC_API_KEY environment variable.")]
     public async Task<string> CwAiRescore()
     {
+        if (_aiRescorer == null)
+            return "AI rescoring is not available. Set the ANTHROPIC_API_KEY environment variable to enable it.";
+
         if (!_cwPipeline.IsRunning)
             return "CW listener is not running.";
 
