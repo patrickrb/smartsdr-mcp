@@ -160,6 +160,35 @@ public class TransmitController
         }
     }
 
+    /// <summary>
+    /// Key a TUNE carrier through the TX safety layer.
+    /// Checks guard Armed state and band-edge safety before keying.
+    /// </summary>
+    public (bool Success, string Message) TxTune(int tunePower = 5)
+    {
+        var guard = GetTxGuardState();
+        if (!guard.Armed)
+            return (false, "TX guard blocked TUNE: set armed=true via set_tx_guard first.");
+
+        var state = _radioManager.GetState();
+        var freqCheck = _safety.CheckTransmitAllowed(state.FrequencyMHz);
+        if (!freqCheck.Allowed)
+            return (false, freqCheck.Reason!);
+
+        _radioManager.SetRfPower(rfPower: null, tunePower: tunePower);
+        _radioManager.SetTx(mox: null, txTune: true, txMonitor: null, txInhibit: null);
+        TransmitStarted?.Invoke($"TUNE at {tunePower}W");
+        return (true, $"TUNE keyed at {tunePower}W");
+    }
+
+    /// <summary>Stop a running TUNE carrier.</summary>
+    public (bool Success, string Message) TxTuneStop()
+    {
+        _radioManager.SetTx(mox: null, txTune: false, txMonitor: null, txInhibit: null);
+        TransmitCompleted?.Invoke();
+        return (true, "TUNE stopped");
+    }
+
     public (bool Success, string Message) Abort()
     {
         var radio = _radioManager.Radio;

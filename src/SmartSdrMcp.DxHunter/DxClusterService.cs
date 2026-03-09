@@ -19,7 +19,7 @@ public class DxClusterService : IDisposable
     private volatile bool _running;
     private readonly object _lock = new();
     private readonly SemaphoreSlim _pollGuard = new(1, 1); // prevent overlapping polls
-    private readonly HashSet<string> _pushedSpots = new(); // "CALL|FREQ" dedup
+    private readonly HashSet<string> _pushedSpots = new(StringComparer.OrdinalIgnoreCase); // "CALL|FREQ" dedup
     private readonly List<string> _statusLog = new();
 
     // Configuration
