@@ -3,6 +3,10 @@
   <ItemGroup>
     <ProjectReference Include="..\SmartSdrMcp.Radio\SmartSdrMcp.Radio.csproj" />
     <ProjectReference Include="..\SmartSdrMcp.BandScout\SmartSdrMcp.BandScout.csproj" />
+    <ProjectReference Include="..\SmartSdrMcp.Cw\SmartSdrMcp.Cw.csproj" />
+    <ProjectReference Include="..\SmartSdrMcp.Ai\SmartSdrMcp.Ai.csproj" />
+    <ProjectReference Include="..\SmartSdrMcp.Ssb\SmartSdrMcp.Ssb.csproj" />
+    <ProjectReference Include="..\SmartSdrMcp.Tx\SmartSdrMcp.Tx.csproj" />
     <ProjectReference Include="..\..\lib\FlexLib_Core\FlexLib\FlexLib.csproj" />
   </ItemGroup>
 

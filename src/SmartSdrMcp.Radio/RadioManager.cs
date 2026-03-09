@@ -395,6 +395,12 @@ public class RadioManager : IDisposable
         };
     }
 
+    public int? GetTunePower()
+    {
+        var radio = _radio;
+        return radio?.Connected == true ? radio.TunePower : null;
+    }
+
     public bool SetRfPower(int? rfPower, int? tunePower)
     {
         var radio = _radio;
@@ -781,6 +787,52 @@ public class RadioManager : IDisposable
         if (fps.HasValue) pan.FPS = fps.Value;
         if (average.HasValue) pan.Average = average.Value;
         return true;
+    }
+
+    // --- Add Spot (#30) ---
+
+    // Validates "#AARRGGBB" hex color format expected by FlexRadio spot API
+    private static bool IsValidArgbColor(string color) =>
+        color.Length == 9 && color[0] == '#' &&
+        color[1..].All(Uri.IsHexDigit);
+
+    public bool AddSpot(string callsign, double frequencyMHz, string? mode = null,
+        string? color = null, string? backgroundColor = null,
+        string? spotterCallsign = null, string? source = null,
+        string? comment = null, int lifetimeSeconds = 600)
+    {
+        var radio = _radio;
+        if (radio == null || !radio.Connected) return false;
+        if (string.IsNullOrWhiteSpace(callsign)) return false;
+        if (frequencyMHz <= 0) return false;
+        if (color != null && !IsValidArgbColor(color)) return false;
+        if (backgroundColor != null && !IsValidArgbColor(backgroundColor)) return false;
+        lifetimeSeconds = Math.Clamp(lifetimeSeconds, 0, 86400); // cap at 24h
+
+        var spot = new Flex.Smoothlake.FlexLib.Spot
+        {
+            Callsign = callsign,
+            RXFrequency = frequencyMHz,
+            LifetimeSeconds = lifetimeSeconds
+        };
+
+        if (mode != null) spot.Mode = mode;
+        if (color != null) spot.Color = color;
+        if (backgroundColor != null) spot.BackgroundColor = backgroundColor;
+        if (spotterCallsign != null) spot.SpotterCallsign = spotterCallsign;
+        if (source != null) spot.Source = source;
+        if (comment != null) spot.Comment = comment;
+        spot.Timestamp = DateTime.UtcNow;
+
+        radio.RequestSpot(spot);
+        return true;
+    }
+
+    public void ClearAllSpots()
+    {
+        var radio = _radio;
+        if (radio == null || !radio.Connected) return;
+        radio.ClearAllSpots();
     }
 
     // --- Tune to Spot (#29) ---

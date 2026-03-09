@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\SmartSdrMcp.Qso\SmartSdrMcp.Qso.csproj" />
+    <ProjectReference Include="..\SmartSdrMcp.Cw\SmartSdrMcp.Cw.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

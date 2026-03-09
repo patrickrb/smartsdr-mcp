@@ -11,6 +11,7 @@ public class DxHunterTools
 {
     private readonly DxHunterAgent _dxHunter;
     private readonly RadioManager _radioManager;
+    private readonly DxClusterService _clusterService;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -18,10 +19,11 @@ public class DxHunterTools
         PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower
     };
 
-    public DxHunterTools(DxHunterAgent dxHunter, RadioManager radioManager)
+    public DxHunterTools(DxHunterAgent dxHunter, RadioManager radioManager, DxClusterService clusterService)
     {
         _dxHunter = dxHunter;
         _radioManager = radioManager;
+        _clusterService = clusterService;
     }
 
     [McpServerTool, Description(
@@ -37,13 +39,15 @@ public class DxHunterTools
         "Start the Auto DX Hunter. Watches incoming DX spots and cross-references each one against your logbook. " +
         "Alerts you when a spotted station is a DXCC entity you haven't worked on that band yet (a 'need'). " +
         "Optionally filter by band (e.g. '20m') and mode (e.g. 'CW'). " +
-        "Set autoTune=true to automatically QSY to the highest priority need when detected.")]
-    public string DxHunterStart(string? band = null, string? mode = null, bool autoTune = false)
+        "Set autoTune=true to automatically QSY to each need, listen with the CW decoder (for CW spots) " +
+        "or SSB speech-to-text (for SSB/phone spots) for listenSeconds, AI-rescore if CW, " +
+        "and report what was heard. This creates an active DX hunting loop.")]
+    public string DxHunterStart(string? band = null, string? mode = null, bool autoTune = false, int listenSeconds = 15)
     {
         if (!_radioManager.IsConnected)
             return "Not connected to a radio. Call connect_radio first.";
 
-        return _dxHunter.Start(band, mode, autoTune);
+        return _dxHunter.Start(band, mode, autoTune, listenSeconds);
     }
 
     [McpServerTool, Description("Stop the Auto DX Hunter.")]
@@ -106,5 +110,44 @@ public class DxHunterTools
     {
         var entity = DxccLookup.GetEntity(callsign);
         return $"{callsign.ToUpperInvariant()} → {entity}";
+    }
+
+    [McpServerTool, Description(
+        "Get results from the DX Hunter's active listening sessions. When autoTune is enabled, " +
+        "the hunter tunes to each DX need and listens with the CW decoder + AI rescorer. " +
+        "This returns what was heard on each frequency — raw decode and AI-corrected text.")]
+    public string DxHunterListenResults()
+    {
+        var results = _dxHunter.GetListenResults();
+        if (results.Count == 0)
+            return "No listen results yet. Start the DX Hunter with autoTune=true to begin active hunting.";
+
+        return JsonSerializer.Serialize(results, JsonOptions);
+    }
+
+    // --- DX Cluster Feed ---
+
+    [McpServerTool, Description(
+        "Start the DX Cluster spot feed. Fetches DX spots from HamQTH and pushes them to the radio's panadapter. " +
+        "Spots appear as colored markers — blue for normal spots, RED for DX needs (entities you haven't worked). " +
+        "Optionally filter by band (e.g. '20m') and mode (e.g. 'CW'). Poll interval in seconds (default 30, minimum 15).")]
+    public string DxClusterStart(string? band = null, string? mode = null, int pollSeconds = 30)
+    {
+        if (!_radioManager.IsConnected)
+            return "Not connected to a radio. Call connect_radio first.";
+
+        return _clusterService.Start(band, mode, pollSeconds);
+    }
+
+    [McpServerTool, Description("Stop the DX Cluster spot feed and stop pushing spots to the panadapter.")]
+    public string DxClusterStop()
+    {
+        return _clusterService.Stop();
+    }
+
+    [McpServerTool, Description("Get DX Cluster feed status including spots pushed and recent log entries.")]
+    public string DxClusterStatus()
+    {
+        return JsonSerializer.Serialize(_clusterService.GetStatus(), JsonOptions);
     }
 }

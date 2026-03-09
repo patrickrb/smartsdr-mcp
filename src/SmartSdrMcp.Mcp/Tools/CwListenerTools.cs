@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using ModelContextProtocol.Server;
+using SmartSdrMcp.Ai;
 using SmartSdrMcp.Audio;
 using SmartSdrMcp.Cw;
 using SmartSdrMcp.Qso;
@@ -18,19 +19,22 @@ public class CwListenerTools
     private readonly CwPipeline _cwPipeline;
     private readonly MessageSegmenter _messageSegmenter;
     private readonly QsoTracker _qsoTracker;
+    private readonly CwAiRescorer? _aiRescorer;
 
     public CwListenerTools(
         RadioManager radioManager,
         AudioPipeline audioPipeline,
         CwPipeline cwPipeline,
         MessageSegmenter messageSegmenter,
-        QsoTracker qsoTracker)
+        QsoTracker qsoTracker,
+        CwAiRescorer? aiRescorer = null)
     {
         _radioManager = radioManager;
         _audioPipeline = audioPipeline;
         _cwPipeline = cwPipeline;
         _messageSegmenter = messageSegmenter;
         _qsoTracker = qsoTracker;
+        _aiRescorer = aiRescorer;
     }
 
     [McpServerTool, Description("Start continuous CW listening on the current slice. Captures DAX audio, decodes Morse code, and tracks QSO state. Set fixedWpm to lock decoder speed (0 = auto-detect).")]
@@ -159,6 +163,64 @@ public class CwListenerTools
             info.StartedUtc,
             info.EndedUtc
         }, new JsonSerializerOptions { WriteIndented = true });
+    }
+
+    [McpServerTool, Description("AI-rescore the current CW decode buffer. Uses Claude to correct dit/dah confusions and apply ham radio context. Requires ANTHROPIC_API_KEY environment variable.")]
+    public async Task<string> CwAiRescore()
+    {
+        if (_aiRescorer == null)
+            return "AI rescoring is not available. Set the ANTHROPIC_API_KEY environment variable to enable it.";
+
+        if (!_cwPipeline.IsRunning)
+            return "CW listener is not running.";
+
+        var rawText = _cwPipeline.GetLiveText();
+        if (string.IsNullOrWhiteSpace(rawText))
+            return "No CW text to rescore.";
+
+        var characters = _cwPipeline.GetRecentCharacters();
+        var result = await _aiRescorer.RescoreAsync(rawText, characters);
+
+        if (!result.AiApplied)
+            return $"AI rescoring failed: {result.Error}\nOriginal: {result.OriginalText}";
+
+        return $"Original:  {result.OriginalText}\nCorrected: {result.CorrectedText}";
+    }
+
+    [McpServerTool, Description("Get N-best character alternatives for the current CW decode. Shows ambiguous characters with their alternative interpretations and confidence scores.")]
+    public string CwGetAlternatives()
+    {
+        if (!_cwPipeline.IsRunning)
+            return "CW listener is not running.";
+
+        var characters = _cwPipeline.GetRecentCharacters();
+        if (characters.Count == 0)
+            return "No decoded characters yet.";
+
+        var ambiguous = characters
+            .Select((c, i) => new { c, i })
+            .Where(x => x.c.Alternatives is { Count: > 0 })
+            .Select(x => new
+            {
+                Position = x.i,
+                x.c.Character,
+                Pattern = x.c.DitDahPattern,
+                x.c.Confidence,
+                Alternatives = x.c.Alternatives!.Select(a => new
+                {
+                    a.Character,
+                    a.DitDahPattern,
+                    a.Score
+                })
+            })
+            .ToList();
+
+        if (ambiguous.Count == 0)
+            return "No ambiguous characters — all decodes were high confidence.";
+
+        var text = _cwPipeline.GetLiveText();
+        var result = new { DecodedText = text, AmbiguousCount = ambiguous.Count, Total = characters.Count, Ambiguous = ambiguous };
+        return JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true });
     }
 
     [McpServerTool, Description("Export current/recent QSO data. Formats: json or adif.")]

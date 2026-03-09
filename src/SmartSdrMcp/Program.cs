@@ -41,6 +41,16 @@ builder.Services.AddSingleton<QsoTracker>(sp =>
 });
 builder.Services.AddSingleton<ReplyGenerator>(_ =>
     new ReplyGenerator(MyCallsign, MyName));
+var anthropicApiKey = Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY");
+if (!string.IsNullOrWhiteSpace(anthropicApiKey))
+{
+    builder.Services.AddSingleton<CwAiRescorer>(sp =>
+    {
+        var client = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        CwAiRescorer.ConfigureHttpClient(client, anthropicApiKey);
+        return new CwAiRescorer(client);
+    });
+}
 builder.Services.AddSingleton<TransmitController>();
 builder.Services.AddSingleton<SsbPipeline>(sp =>
 {
@@ -59,7 +69,16 @@ builder.Services.AddSingleton<ContestAgent>(sp =>
 builder.Services.AddSingleton<BandScoutMonitor>(sp =>
     new BandScoutMonitor(sp.GetRequiredService<RadioManager>()));
 builder.Services.AddSingleton<DxHunterAgent>(sp =>
-    new DxHunterAgent(sp.GetRequiredService<RadioManager>()));
+    new DxHunterAgent(
+        sp.GetRequiredService<RadioManager>(),
+        sp.GetRequiredService<CwPipeline>(),
+        sp.GetService<CwAiRescorer>(),
+        sp.GetRequiredService<SsbPipeline>(),
+        sp.GetRequiredService<TransmitController>()));
+builder.Services.AddSingleton<DxClusterService>(sp =>
+    new DxClusterService(
+        sp.GetRequiredService<RadioManager>(),
+        sp.GetRequiredService<DxHunterAgent>()));
 
 // MCP Server
 builder.Services.AddMcpServer()

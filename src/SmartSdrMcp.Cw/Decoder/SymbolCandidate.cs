@@ -7,3 +7,11 @@ public record SymbolCandidate(
     double Confidence,
     MorseElement? Alternative = null,
     double AltConfidence = 0);
+
+/// <summary>
+/// An alternative character interpretation with its dit-dah pattern and score.
+/// </summary>
+public record CharacterCandidate(
+    string DitDahPattern,
+    string Character,
+    double Score);

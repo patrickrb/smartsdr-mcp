@@ -109,6 +109,18 @@ public class CwPipeline : IDisposable
         }
     }
 
+    /// <summary>
+    /// Get recent decoded characters with their N-best alternatives for AI rescoring.
+    /// </summary>
+    public List<DecodedCharacter> GetRecentCharacters(int count = 100)
+    {
+        lock (_textLock)
+        {
+            int start = Math.Max(0, _recentChars.Count - count);
+            return _recentChars.Skip(start).ToList();
+        }
+    }
+
     public void ClearLiveText()
     {
         lock (_textLock) _liveBuffer = "";
