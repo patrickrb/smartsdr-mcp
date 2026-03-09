@@ -792,6 +792,9 @@ public class RadioManager : IDisposable
     {
         var radio = _radio;
         if (radio == null || !radio.Connected) return false;
+        if (string.IsNullOrWhiteSpace(callsign)) return false;
+        if (frequencyMHz <= 0) return false;
+        lifetimeSeconds = Math.Clamp(lifetimeSeconds, 0, 86400); // cap at 24h
 
         var spot = new Flex.Smoothlake.FlexLib.Spot
         {

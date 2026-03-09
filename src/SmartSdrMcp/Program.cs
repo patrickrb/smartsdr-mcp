@@ -41,11 +41,12 @@ builder.Services.AddSingleton<QsoTracker>(sp =>
 });
 builder.Services.AddSingleton<ReplyGenerator>(_ =>
     new ReplyGenerator(MyCallsign, MyName));
-builder.Services.AddSingleton<CwAiRescorer>(sp =>
+builder.Services.AddSingleton<CwAiRescorer?>(sp =>
 {
-    var httpClient = new HttpClient();
-    var apiKey = Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY")
-        ?? throw new InvalidOperationException("ANTHROPIC_API_KEY environment variable is required for CW AI rescoring.");
+    var apiKey = Environment.GetEnvironmentVariable("ANTHROPIC_API_KEY");
+    if (string.IsNullOrWhiteSpace(apiKey))
+        return null; // AI rescoring disabled — server still works without it
+    var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
     CwAiRescorer.ConfigureHttpClient(httpClient, apiKey);
     return new CwAiRescorer(httpClient);
 });
@@ -70,8 +71,9 @@ builder.Services.AddSingleton<DxHunterAgent>(sp =>
     new DxHunterAgent(
         sp.GetRequiredService<RadioManager>(),
         sp.GetRequiredService<CwPipeline>(),
-        sp.GetRequiredService<CwAiRescorer>(),
-        sp.GetRequiredService<SsbPipeline>()));
+        sp.GetService<CwAiRescorer>(),
+        sp.GetRequiredService<SsbPipeline>(),
+        sp.GetRequiredService<TransmitController>()));
 builder.Services.AddSingleton<DxClusterService>(sp =>
     new DxClusterService(
         sp.GetRequiredService<RadioManager>(),

@@ -3,6 +3,7 @@ using SmartSdrMcp.BandScout;
 using SmartSdrMcp.Cw;
 using SmartSdrMcp.Radio;
 using SmartSdrMcp.Ssb;
+using SmartSdrMcp.Tx;
 
 namespace SmartSdrMcp.DxHunter;
 
@@ -12,6 +13,7 @@ public class DxHunterAgent
     private readonly CwPipeline? _cwPipeline;
     private readonly CwAiRescorer? _aiRescorer;
     private readonly SsbPipeline? _ssbPipeline;
+    private readonly TransmitController? _txController;
     private readonly object _lock = new();
     private readonly List<string> _statusLog = new();
     private readonly List<ListenResult> _listenResults = new();
@@ -42,12 +44,13 @@ public class DxHunterAgent
 
     public bool IsRunning => _running;
 
-    public DxHunterAgent(RadioManager radioManager, CwPipeline? cwPipeline = null, CwAiRescorer? aiRescorer = null, SsbPipeline? ssbPipeline = null)
+    public DxHunterAgent(RadioManager radioManager, CwPipeline? cwPipeline = null, CwAiRescorer? aiRescorer = null, SsbPipeline? ssbPipeline = null, TransmitController? txController = null)
     {
         _radioManager = radioManager;
         _cwPipeline = cwPipeline;
         _aiRescorer = aiRescorer;
         _ssbPipeline = ssbPipeline;
+        _txController = txController;
     }
 
     // Allowed file extensions for log files
@@ -494,26 +497,46 @@ public class DxHunterAgent
         // TUNE carrier if band changed — keys TX at 5W, watches SWR until it stabilizes
         if (bandChanged && spotBand != "OOB")
         {
-            lock (_lock) { LogStatus($"Band change: {_currentBand} → {spotBand} — TUNE at 5W..."); }
-            _currentBand = spotBand;
-
-            // Set tune power to 5W, then key the TUNE carrier
-            _radioManager.SetRfPower(rfPower: null, tunePower: 5);
-            _radioManager.SetTx(mox: null, txTune: true, txMonitor: null, txInhibit: null);
-
-            // Wait for SWR to stabilize (< 2.0) or timeout at 10s
-            var tuneResult = WaitForSwrStable(maxWaitMs: 10_000, targetSwr: 2.0, stableReadings: 3);
-
-            if (!_running)
+            // Check TX guard — don't transmit if inhibited
+            var txGuard = _txController?.GetTxGuardState();
+            if (txGuard != null && !txGuard.Armed)
             {
-                _radioManager.SetTx(mox: null, txTune: false, txMonitor: null, txInhibit: null);
-                return;
+                lock (_lock) { LogStatus($"Band change: {_currentBand} → {spotBand} — TX inhibited, skipping TUNE."); }
+                _currentBand = spotBand;
             }
+            else
+            {
+                lock (_lock) { LogStatus($"Band change: {_currentBand} → {spotBand} — TUNE at 5W..."); }
+                _currentBand = spotBand;
 
-            // Stop TUNE
-            _radioManager.SetTx(mox: null, txTune: false, txMonitor: null, txInhibit: null);
-            Thread.Sleep(300); // brief settle time
-            lock (_lock) { LogStatus(tuneResult); }
+                // Save prior tune power to restore after
+                int? priorTunePower = null;
+                var rfState = _radioManager.GetRfPower();
+                if (rfState != null)
+                {
+                    var tpProp = rfState.GetType().GetProperty("TunePower");
+                    if (tpProp?.GetValue(rfState) is int tp) priorTunePower = tp;
+                }
+
+                // Set tune power to 5W, then key the TUNE carrier
+                _radioManager.SetRfPower(rfPower: null, tunePower: 5);
+                _radioManager.SetTx(mox: null, txTune: true, txMonitor: null, txInhibit: null);
+
+                // Wait for SWR to stabilize (< 2.0) or timeout at 10s
+                var tuneResult = WaitForSwrStable(maxWaitMs: 10_000, targetSwr: 2.0, stableReadings: 3);
+
+                // Stop TUNE
+                _radioManager.SetTx(mox: null, txTune: false, txMonitor: null, txInhibit: null);
+
+                // Restore prior tune power
+                if (priorTunePower.HasValue)
+                    _radioManager.SetRfPower(rfPower: null, tunePower: priorTunePower.Value);
+
+                if (!_running) return;
+
+                Thread.Sleep(300); // brief settle time
+                lock (_lock) { LogStatus(tuneResult); }
+            }
         }
         else if (spotBand != "OOB")
         {
@@ -585,11 +608,22 @@ public class DxHunterAgent
         {
             try
             {
-                var result = _aiRescorer.RescoreAsync(rawText, chars).GetAwaiter().GetResult();
-                if (result.AiApplied)
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+                var rescoreTask = _aiRescorer.RescoreAsync(rawText, chars);
+                var completed = Task.WhenAny(rescoreTask, Task.Delay(10_000, cts.Token)).GetAwaiter().GetResult();
+                if (completed == rescoreTask)
                 {
-                    correctedText = result.CorrectedText;
-                    aiApplied = true;
+                    cts.Cancel();
+                    var result = rescoreTask.GetAwaiter().GetResult();
+                    if (result.AiApplied)
+                    {
+                        correctedText = result.CorrectedText;
+                        aiApplied = true;
+                    }
+                }
+                else
+                {
+                    lock (_lock) { LogStatus($"AI rescore timeout for {spot.Callsign}, skipping"); }
                 }
             }
             catch (Exception ex)

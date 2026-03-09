@@ -47,7 +47,7 @@ public class CwAiRescorer
             var json = JsonSerializer.Serialize(request);
             var content = new StringContent(json, Encoding.UTF8, "application/json");
 
-            var response = await _httpClient.PostAsync("https://api.anthropic.com/v1/messages", content);
+            using var response = await _httpClient.PostAsync("https://api.anthropic.com/v1/messages", content);
 
             if (!response.IsSuccessStatusCode)
             {

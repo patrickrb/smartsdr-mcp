@@ -171,6 +171,12 @@ public class MorseDecoder
                 .ToList();
         }
 
+        // Precompute position → ambiguous index mapping to avoid O(n²) IndexOf
+        var ambiguousIndex = new int[_currentCandidates.Count];
+        Array.Fill(ambiguousIndex, -1);
+        for (int ai = 0; ai < ambiguous.Count; ai++)
+            ambiguousIndex[ambiguous[ai]] = ai;
+
         var results = new List<CharacterCandidate>();
         int combos = 1 << ambiguous.Count;
 
@@ -181,7 +187,7 @@ public class MorseDecoder
 
             for (int i = 0; i < _currentCandidates.Count; i++)
             {
-                int ambIdx = ambiguous.IndexOf(i);
+                int ambIdx = ambiguousIndex[i];
                 bool flip = ambIdx >= 0 && (mask & (1 << ambIdx)) != 0;
 
                 if (flip)

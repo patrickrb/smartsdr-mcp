@@ -1,4 +1,5 @@
 using System.Globalization;
+using SmartSdrMcp.BandScout;
 using SmartSdrMcp.Radio;
 
 namespace SmartSdrMcp.DxHunter;
@@ -15,8 +16,9 @@ public class DxClusterService : IDisposable
     private const string BaseUrl = "https://www.hamqth.com/dxc_csv.php";
 
     private Timer? _pollTimer;
-    private bool _running;
+    private volatile bool _running;
     private readonly object _lock = new();
+    private readonly SemaphoreSlim _pollGuard = new(1, 1); // prevent overlapping polls
     private readonly HashSet<string> _pushedSpots = new(); // "CALL|FREQ" dedup
     private readonly List<string> _statusLog = new();
 
@@ -93,14 +95,19 @@ public class DxClusterService : IDisposable
 
     private async Task PollAndPushSpots()
     {
+        if (!_running) return;
+        if (!_pollGuard.Wait(0)) return; // skip if another poll is already running
         try
         {
             var spots = await FetchSpots();
+            if (!_running) return; // re-check after async fetch
             int pushed = 0;
             int needCount = 0;
 
             foreach (var spot in spots)
             {
+                if (!_running) break;
+
                 var key = $"{spot.DxCall}|{spot.FrequencyKhz:F1}";
                 lock (_lock)
                 {
@@ -135,7 +142,7 @@ public class DxClusterService : IDisposable
                         spotMode = ModeFilter;
                 }
 
-                _radioManager.AddSpot(
+                bool spotPushed = _radioManager.AddSpot(
                     callsign: spot.DxCall,
                     frequencyMHz: freqMHz,
                     mode: spotMode,
@@ -146,8 +153,11 @@ public class DxClusterService : IDisposable
                     comment: comment,
                     lifetimeSeconds: SpotLifetimeSeconds);
 
-                pushed++;
-                if (isNeed) needCount++;
+                if (spotPushed)
+                {
+                    pushed++;
+                    if (isNeed) needCount++;
+                }
             }
 
             if (pushed > 0)
@@ -157,15 +167,23 @@ public class DxClusterService : IDisposable
         {
             LogStatus($"Poll error: {ex.Message}");
         }
+        finally
+        {
+            _pollGuard.Release();
+        }
     }
 
     private bool IsNeed(string callsign, double frequencyKhz)
     {
         if (_dxHunter == null || !_dxHunter.IsRunning) return false;
 
-        // Check if the DX hunter considers this a need by looking at its alert list
+        // Infer band from frequency for accurate matching
+        var band = BandScout.BandScoutMonitor.FrequencyToBand(frequencyKhz / 1000.0);
+
+        // Check if the DX hunter considers this a need on this specific band
         var needs = _dxHunter.GetNeeds();
-        return needs.Any(n => string.Equals(n.Callsign, callsign, StringComparison.OrdinalIgnoreCase));
+        return needs.Any(n => string.Equals(n.Callsign, callsign, StringComparison.OrdinalIgnoreCase)
+            && (band == "OOB" || string.Equals(n.Band, band, StringComparison.OrdinalIgnoreCase)));
     }
 
     private async Task<List<ClusterSpot>> FetchSpots()
@@ -198,11 +216,12 @@ public class DxClusterService : IDisposable
             var dtParts = fields[4].Trim().Split(' ');
             if (dtParts.Length == 2 && dtParts[0].Length == 4)
             {
-                if (DateTime.TryParse(dtParts[1], out var date) &&
+                if (DateTime.TryParse(dtParts[1], CultureInfo.InvariantCulture,
+                        DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var date) &&
                     int.TryParse(dtParts[0][..2], out var hour) &&
                     int.TryParse(dtParts[0][2..], out var min))
                 {
-                    spotted = date.AddHours(hour).AddMinutes(min);
+                    spotted = new DateTime(date.Year, date.Month, date.Day, hour, min, 0, DateTimeKind.Utc);
                 }
             }
 
