@@ -15,10 +15,14 @@ public class CwAiRescorer
     private readonly HttpClient _httpClient;
     private readonly string _model;
 
-    public CwAiRescorer(HttpClient httpClient, string model = "claude-haiku-4-5-20251001")
+    private const string DefaultModel = "claude-haiku-4-5-20251001";
+
+    public CwAiRescorer(HttpClient httpClient, string? model = null)
     {
         _httpClient = httpClient;
-        _model = model;
+        _model = model
+            ?? Environment.GetEnvironmentVariable("ANTHROPIC_MODEL")
+            ?? DefaultModel;
     }
 
     /// <summary>

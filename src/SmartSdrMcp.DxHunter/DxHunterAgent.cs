@@ -152,7 +152,7 @@ public class DxHunterAgent
             _listenedAlerts.Clear();
             var bandInfo = string.IsNullOrEmpty(_targetBand) ? "all bands" : _targetBand;
             var modeInfo = string.IsNullOrEmpty(_targetMode) ? "all modes" : _targetMode;
-            var listenInfo = autoTune && _cwPipeline != null ? $", Listen={_listenDurationSeconds}s" : "";
+            var listenInfo = autoTune && (_cwPipeline != null || _ssbPipeline != null) ? $", Listen={_listenDurationSeconds}s" : "";
             LogStatus($"DX Hunter started. Watching {bandInfo}, {modeInfo}. AutoTune={autoTune}{listenInfo}.");
         }
 
@@ -497,9 +497,9 @@ public class DxHunterAgent
         // TUNE carrier if band changed — keys TX at 5W, watches SWR until it stabilizes
         if (bandChanged && spotBand != "OOB")
         {
-            // Check TX guard — don't transmit if inhibited
+            // Treat missing _txController as TX-inhibited so we never key without safety enforcement
             var txGuard = _txController?.GetTxGuardState();
-            if (txGuard != null && !txGuard.Armed)
+            if (txGuard == null || !txGuard.Armed)
             {
                 lock (_lock) { LogStatus($"Band change: {_currentBand} → {spotBand} — TX inhibited, skipping TUNE."); }
                 _currentBand = spotBand;
@@ -510,32 +510,31 @@ public class DxHunterAgent
                 _currentBand = spotBand;
 
                 // Save prior tune power to restore after
-                int? priorTunePower = null;
-                var rfState = _radioManager.GetRfPower();
-                if (rfState != null)
+                int? priorTunePower = _radioManager.GetTunePower();
+
+                // Key TUNE through TransmitController for band-edge safety enforcement
+                var tuneStart = _txController!.TxTune(tunePower: 5);
+                if (!tuneStart.Success)
                 {
-                    var tpProp = rfState.GetType().GetProperty("TunePower");
-                    if (tpProp?.GetValue(rfState) is int tp) priorTunePower = tp;
+                    lock (_lock) { LogStatus($"TUNE blocked: {tuneStart.Message}"); }
                 }
+                else
+                {
+                    // Wait for SWR to stabilize (< 2.0) or timeout at 10s
+                    var tuneResult = WaitForSwrStable(maxWaitMs: 10_000, targetSwr: 2.0, stableReadings: 3);
 
-                // Set tune power to 5W, then key the TUNE carrier
-                _radioManager.SetRfPower(rfPower: null, tunePower: 5);
-                _radioManager.SetTx(mox: null, txTune: true, txMonitor: null, txInhibit: null);
+                    // Stop TUNE via TransmitController
+                    _txController!.TxTuneStop();
 
-                // Wait for SWR to stabilize (< 2.0) or timeout at 10s
-                var tuneResult = WaitForSwrStable(maxWaitMs: 10_000, targetSwr: 2.0, stableReadings: 3);
+                    // Restore prior tune power
+                    if (priorTunePower.HasValue)
+                        _radioManager.SetRfPower(rfPower: null, tunePower: priorTunePower.Value);
 
-                // Stop TUNE
-                _radioManager.SetTx(mox: null, txTune: false, txMonitor: null, txInhibit: null);
+                    if (!_running) return;
 
-                // Restore prior tune power
-                if (priorTunePower.HasValue)
-                    _radioManager.SetRfPower(rfPower: null, tunePower: priorTunePower.Value);
-
-                if (!_running) return;
-
-                Thread.Sleep(300); // brief settle time
-                lock (_lock) { LogStatus(tuneResult); }
+                    Thread.Sleep(300); // brief settle time
+                    lock (_lock) { LogStatus(tuneResult); }
+                }
             }
         }
         else if (spotBand != "OOB")
@@ -702,9 +701,12 @@ public class DxHunterAgent
     private void LogStatus(string message)
     {
         var entry = $"[{DateTime.UtcNow:HH:mm:ss}] {message}";
-        _statusLog.Add(entry);
-        if (_statusLog.Count > MaxStatusLog)
-            _statusLog.RemoveAt(0);
+        lock (_lock)
+        {
+            _statusLog.Add(entry);
+            if (_statusLog.Count > MaxStatusLog)
+                _statusLog.RemoveAt(0);
+        }
         Console.Error.WriteLine($"[DXHUNTER] {message}");
     }
 
