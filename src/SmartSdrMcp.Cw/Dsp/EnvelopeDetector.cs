@@ -2,6 +2,8 @@ namespace SmartSdrMcp.Cw.Dsp;
 
 /// <summary>
 /// Tracks tone on/off transitions and emits key events with timestamps.
+/// Uses asymmetric debounce: longer for ON (reject noise spikes),
+/// shorter for OFF (preserve gap detection).
 /// </summary>
 public class EnvelopeDetector
 {
@@ -22,13 +24,29 @@ public class EnvelopeDetector
         _lastEventTime = DateTime.UtcNow;
     }
 
-    private double EffectiveMinDuration
+    /// <summary>
+    /// Minimum key-down duration (OFF→ON): reject noise spikes.
+    /// 30% of dit, clamped [15, 45] ms.
+    /// </summary>
+    private double MinKeyDownMs
     {
         get
         {
             if (_wpmEstimator == null) return MinEventDurationMs;
-            // Scale debounce to 40% of estimated dit, clamped to [15, 60] ms
-            return Math.Clamp(_wpmEstimator.EstimatedDitMs * 0.4, 15, 60);
+            return Math.Clamp(_wpmEstimator.EstimatedDitMs * 0.30, 15, 45);
+        }
+    }
+
+    /// <summary>
+    /// Minimum gap duration (ON→OFF): shorter to preserve gap detection.
+    /// 15% of dit, clamped [5, 25] ms.
+    /// </summary>
+    private double MinGapMs
+    {
+        get
+        {
+            if (_wpmEstimator == null) return MinEventDurationMs * 0.5;
+            return Math.Clamp(_wpmEstimator.EstimatedDitMs * 0.15, 5, 25);
         }
     }
 
@@ -37,7 +55,10 @@ public class EnvelopeDetector
         if (tonePresent == _lastToneState) return;
 
         var duration = timestamp - _lastTransitionTime;
-        if (duration.TotalMilliseconds < EffectiveMinDuration) return; // Debounce
+
+        // Asymmetric debounce: use MinGapMs for ON→OFF, MinKeyDownMs for OFF→ON
+        double minDuration = _lastToneState ? MinGapMs : MinKeyDownMs;
+        if (duration.TotalMilliseconds < minDuration) return;
 
         if (_lastToneState) // Was ON, now OFF → key-up
         {
@@ -47,9 +68,8 @@ public class EnvelopeDetector
                 timestamp,
                 duration));
         }
-        else // Was OFF, now ON → key-down
+        else // Was OFF, now ON → key-down (gap)
         {
-            // Emit gap duration
             KeyEventDetected?.Invoke(new KeyEvent(
                 KeyState.Down,
                 _lastTransitionTime,

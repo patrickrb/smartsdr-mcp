@@ -12,7 +12,7 @@ public class BandPassFilter
     public double Bandwidth { get; private set; }
     public double SampleRate { get; private set; }
 
-    public BandPassFilter(double centerFreq = 600, double bandwidth = 100, double sampleRate = 24000)
+    public BandPassFilter(double centerFreq = 600, double bandwidth = 80, double sampleRate = 24000)
     {
         Configure(centerFreq, bandwidth, sampleRate);
     }

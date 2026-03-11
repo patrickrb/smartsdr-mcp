@@ -23,6 +23,12 @@ public class SsbPipeline : IDisposable
         "Sierra, Tango, Uniform, Victor, Whiskey, Xray, Yankee, Zulu.";
 
 
+    /// <summary>
+    /// Whisper prompt used for transcription context. Defaults to ContestPrompt.
+    /// Can be overridden to optimize for specific use cases (e.g., phonetic callsigns).
+    /// </summary>
+    public string Prompt { get; set; } = ContestPrompt;
+
     private WhisperFactory? _factory;
     private bool _running;
 
@@ -191,7 +197,7 @@ public class SsbPipeline : IDisposable
             using var processor = _factory.CreateBuilder()
                 .WithLanguage("en")
                 .WithNoContext()
-                .WithPrompt(ContestPrompt)
+                .WithPrompt(Prompt)
                 .WithSegmentEventHandler((segment) =>
                 {
                     var text = StripParenthesized(segment.Text).Trim();
@@ -205,9 +211,12 @@ public class SsbPipeline : IDisposable
             var fullText = string.Join(" ", decoded);
             if (string.IsNullOrWhiteSpace(fullText)) return;
 
+            // Compute voice fingerprint from the audio samples
+            var fingerprint = VoiceFingerprint.Compute(samples, TargetSampleRate);
+
             lock (_textLock)
             {
-                _segments.Add(new TranscribedSegment(DateTime.UtcNow, fullText, true));
+                _segments.Add(new TranscribedSegment(DateTime.UtcNow, fullText, true, fingerprint));
                 _currentPartial = "";
                 _lastLoggedPartial = "";
 

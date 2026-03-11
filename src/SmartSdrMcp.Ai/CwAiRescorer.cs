@@ -70,6 +70,87 @@ public class CwAiRescorer
         }
     }
 
+    /// <summary>
+    /// Rescore a short segment of CW text with additional context (QSO state, DX spots, recent history).
+    /// Used by the streaming rescorer for word-at-a-time correction.
+    /// </summary>
+    public async Task<AiRescoreResult> RescoreWithContextAsync(
+        string rawText, List<DecodedCharacter> characters, string contextPrompt)
+    {
+        if (string.IsNullOrWhiteSpace(rawText))
+            return new AiRescoreResult(rawText, rawText, false, "Empty input");
+
+        var prompt = contextPrompt + "\n\n" + BuildCompactPrompt(rawText, characters);
+
+        try
+        {
+            var request = new
+            {
+                model = _model,
+                max_tokens = 256,
+                messages = new[]
+                {
+                    new { role = "user", content = prompt }
+                }
+            };
+
+            var json = JsonSerializer.Serialize(request);
+            var content = new StringContent(json, Encoding.UTF8, "application/json");
+
+            using var response = await _httpClient.PostAsync("https://api.anthropic.com/v1/messages", content);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var errorBody = await response.Content.ReadAsStringAsync();
+                return new AiRescoreResult(rawText, rawText, false, $"API error {response.StatusCode}: {errorBody}");
+            }
+
+            var responseJson = await response.Content.ReadAsStringAsync();
+            var apiResponse = JsonSerializer.Deserialize<AnthropicResponse>(responseJson);
+            var corrected = apiResponse?.Content?.FirstOrDefault()?.Text?.Trim();
+
+            if (string.IsNullOrWhiteSpace(corrected))
+                return new AiRescoreResult(rawText, rawText, false, "Empty API response");
+
+            return new AiRescoreResult(rawText, corrected, true, null);
+        }
+        catch (Exception ex)
+        {
+            return new AiRescoreResult(rawText, rawText, false, ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Build a compact prompt for streaming rescoring (fewer tokens than the full batch prompt).
+    /// </summary>
+    private static string BuildCompactPrompt(string rawText, List<DecodedCharacter> characters)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("## Raw decoded text:");
+        sb.AppendLine(rawText);
+        sb.AppendLine();
+
+        // Only include characters with alternatives to save tokens
+        var ambiguous = characters
+            .Select((c, i) => (c, i))
+            .Where(x => x.c.Alternatives is { Count: > 0 })
+            .ToList();
+
+        if (ambiguous.Count > 0)
+        {
+            sb.AppendLine("## Ambiguous characters (position: char [pattern] confidence, alternatives):");
+            foreach (var (ch, i) in ambiguous)
+            {
+                var alts = string.Join(" ", ch.Alternatives!.Select(a => $"{a.Character}({a.Score:F2})"));
+                sb.AppendLine($"  {i}: '{ch.Character}' [{ch.DitDahPattern}] {ch.Confidence:F1}  alts: {alts}");
+            }
+            sb.AppendLine();
+        }
+
+        sb.AppendLine("Output ONLY the corrected text. No explanation.");
+        return sb.ToString();
+    }
+
     private static string BuildPrompt(string rawText, List<DecodedCharacter> characters)
     {
         var sb = new StringBuilder();

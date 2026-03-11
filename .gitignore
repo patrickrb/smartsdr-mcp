@@ -10,3 +10,5 @@ obj/
 *.DotSettings.user
 .claude/
 .mcp.json
+models/*.onnx
+models/*.bin

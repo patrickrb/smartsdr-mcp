@@ -21,6 +21,7 @@ public class DxClusterService : IDisposable
     private readonly SemaphoreSlim _pollGuard = new(1, 1); // prevent overlapping polls
     private readonly HashSet<string> _pushedSpots = new(); // "CALL|FREQ" dedup
     private readonly List<string> _statusLog = new();
+    private List<ClusterSpot> _cachedSpots = new(); // cached for frequency queries
 
     // Configuration
     public int PollIntervalSeconds { get; set; } = 30;
@@ -100,6 +101,7 @@ public class DxClusterService : IDisposable
         try
         {
             var spots = await FetchSpots();
+            _cachedSpots = spots;
             if (!_running) return; // re-check after async fetch
             int pushed = 0;
             int needCount = 0;
@@ -240,6 +242,18 @@ public class DxClusterService : IDisposable
         }
 
         return spots;
+    }
+
+    /// <summary>
+    /// Get DX cluster spots near the given frequency (within toleranceKhz).
+    /// Uses cached spots from the last poll — no additional HTTP calls.
+    /// </summary>
+    public List<ClusterSpot> GetSpotsNearFrequency(double frequencyMHz, double toleranceKhz = 3.0)
+    {
+        var freqKhz = frequencyMHz * 1000.0;
+        return _cachedSpots
+            .Where(s => Math.Abs(s.FrequencyKhz - freqKhz) <= toleranceKhz)
+            .ToList();
     }
 
     private void LogStatus(string message)

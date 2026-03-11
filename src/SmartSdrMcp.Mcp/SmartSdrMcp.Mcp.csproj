@@ -12,6 +12,7 @@
     <ProjectReference Include="..\SmartSdrMcp.BandScout\SmartSdrMcp.BandScout.csproj" />
     <ProjectReference Include="..\SmartSdrMcp.DxHunter\SmartSdrMcp.DxHunter.csproj" />
     <ProjectReference Include="..\SmartSdrMcp.CqCaller\SmartSdrMcp.CqCaller.csproj" />
+    <ProjectReference Include="..\SmartSdrMcp.CwNeural\SmartSdrMcp.CwNeural.csproj" />
   </ItemGroup>
 
   <ItemGroup>

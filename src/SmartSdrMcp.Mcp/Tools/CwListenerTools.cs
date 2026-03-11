@@ -6,6 +6,7 @@ using ModelContextProtocol.Server;
 using SmartSdrMcp.Ai;
 using SmartSdrMcp.Audio;
 using SmartSdrMcp.Cw;
+using SmartSdrMcp.CwNeural;
 using SmartSdrMcp.Qso;
 using SmartSdrMcp.Radio;
 
@@ -20,6 +21,8 @@ public class CwListenerTools
     private readonly MessageSegmenter _messageSegmenter;
     private readonly QsoTracker _qsoTracker;
     private readonly CwAiRescorer _aiRescorer;
+    private readonly CwStreamingRescorer? _streamingRescorer;
+    private readonly NeuralCwDecoder? _neuralDecoder;
 
     public CwListenerTools(
         RadioManager radioManager,
@@ -27,7 +30,9 @@ public class CwListenerTools
         CwPipeline cwPipeline,
         MessageSegmenter messageSegmenter,
         QsoTracker qsoTracker,
-        CwAiRescorer aiRescorer)
+        CwAiRescorer aiRescorer,
+        CwStreamingRescorer? streamingRescorer = null,
+        NeuralCwDecoder? neuralDecoder = null)
     {
         _radioManager = radioManager;
         _audioPipeline = audioPipeline;
@@ -35,6 +40,8 @@ public class CwListenerTools
         _messageSegmenter = messageSegmenter;
         _qsoTracker = qsoTracker;
         _aiRescorer = aiRescorer;
+        _streamingRescorer = streamingRescorer;
+        _neuralDecoder = neuralDecoder;
     }
 
     [McpServerTool, Description("Start continuous CW listening on the current slice. Captures DAX audio, decodes Morse code, and tracks QSO state. Set fixedWpm to lock decoder speed (0 = auto-detect).")]
@@ -59,14 +66,23 @@ public class CwListenerTools
         _cwPipeline.Start();
         _messageSegmenter.Start(state.FrequencyMHz);
 
+        // Start neural decoder if model is available
+        string neuralStatus = "";
+        if (_neuralDecoder != null)
+        {
+            var neuralResult = _neuralDecoder.Start();
+            neuralStatus = neuralResult == "ok" ? " Neural CW decoder active." : $" Neural: {neuralResult}";
+        }
+
         string wpmMode = fixedWpm > 0 ? $"fixed {fixedWpm}" : $"~{_cwPipeline.EstimatedWpm:F0} (auto)";
         return $"CW listener started on {state.FrequencyMHz:F6} MHz, DAX channel {daxChannel}. " +
-               $"CW pitch {state.CwPitch} Hz, decoding at {wpmMode} WPM.";
+               $"CW pitch {state.CwPitch} Hz, decoding at {wpmMode} WPM.{neuralStatus}";
     }
 
     [McpServerTool, Description("Stop CW listening and audio capture.")]
     public string CwListenerStop()
     {
+        _neuralDecoder?.Stop();
         _messageSegmenter.Stop();
         _cwPipeline.Stop();
         _audioPipeline.Stop();
@@ -83,6 +99,17 @@ public class CwListenerTools
         var keys = _cwPipeline.GetKeyEventLog();
         var diag = $"[{_cwPipeline.EstimatedWpm:F0} WPM | Mag:{_cwPipeline.ToneMagnitude:F4} NF:{_cwPipeline.NoiseFloor:F4} Pk:{_cwPipeline.PeakMagnitude:F4} TD:{(_cwPipeline.TonePresent ? "ON" : "off")}]";
         var result = string.IsNullOrWhiteSpace(text) ? $"{diag} (no CW detected)" : $"{diag} {text}";
+        if (_neuralDecoder is { IsRunning: true })
+        {
+            var neuralText = _neuralDecoder.GetLiveText();
+            result += $"\nNeural: {neuralText}";
+        }
+        if (_streamingRescorer is { IsRunning: true })
+        {
+            var aiText = _streamingRescorer.GetRescoredText();
+            if (!string.IsNullOrWhiteSpace(aiText))
+                result += $"\nAI: {aiText}";
+        }
         if (!string.IsNullOrEmpty(keys))
             result += $"\nKeys: {keys}";
         return result;
@@ -218,6 +245,37 @@ public class CwListenerTools
         var text = _cwPipeline.GetLiveText();
         var result = new { DecodedText = text, AmbiguousCount = ambiguous.Count, Total = characters.Count, Ambiguous = ambiguous };
         return JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true });
+    }
+
+    [McpServerTool, Description("Start streaming AI CW rescoring. Automatically corrects decoded text after each word gap using QSO context, DX cluster spots, and character alternatives. Requires ANTHROPIC_API_KEY.")]
+    public string CwStreamingRescoreStart()
+    {
+        if (_streamingRescorer == null)
+            return "Streaming AI rescorer not available. Set ANTHROPIC_API_KEY environment variable.";
+        if (!_cwPipeline.IsRunning)
+            return "CW listener is not running. Start it first.";
+        return _streamingRescorer.Start();
+    }
+
+    [McpServerTool, Description("Stop streaming AI CW rescoring and return the accumulated AI-corrected text.")]
+    public string CwStreamingRescoreStop()
+    {
+        if (_streamingRescorer == null)
+            return "Streaming AI rescorer not available.";
+        var text = _streamingRescorer.GetRescoredText();
+        var result = _streamingRescorer.Stop();
+        return string.IsNullOrWhiteSpace(text) ? result : $"{result}\nAI-corrected text: {text}";
+    }
+
+    [McpServerTool, Description("Get the current AI-corrected CW text from streaming rescoring.")]
+    public string CwGetStreamingText()
+    {
+        if (_streamingRescorer == null)
+            return "Streaming AI rescorer not available.";
+        if (!_streamingRescorer.IsRunning)
+            return "Streaming AI rescorer is not running.";
+        var text = _streamingRescorer.GetRescoredText();
+        return string.IsNullOrWhiteSpace(text) ? "(no AI-corrected text yet)" : text;
     }
 
     [McpServerTool, Description("Export current/recent QSO data. Formats: json or adif.")]

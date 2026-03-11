@@ -21,6 +21,7 @@ public class CqCallerAgent
     private readonly TransmitController _txController;
     private readonly SsbPipeline _ssbPipeline;
     private readonly CwAiRescorer? _aiRescorer;
+    private readonly SsbAiCallsignExtractor? _aiExtractor;
     private readonly FccLicenseLookup _fccLookup = new();
     private readonly FrequencyScanner _scanner = new();
     private VoiceTransmitter? _voiceTx;
@@ -34,7 +35,7 @@ public class CqCallerAgent
 
     // Timeouts (milliseconds)
     private const int ListeningTimeoutMs = 5_000;
-    private const int VoiceListeningTimeoutMs = 8_000;
+    private const int VoiceListeningTimeoutMs = 10_000;
     private const int NoCallerTimeoutMs = 3_000;
     private const int ReceivingExchangeTimeoutMs = 15_000;
     private const int VoiceReceivingExchangeTimeoutMs = 20_000;
@@ -80,6 +81,8 @@ public class CqCallerAgent
     private const string VoiceUnintelligibleResponse =
         "Station calling, I could not copy you. " +
         "Please call again slowly and clearly. This is {0}, AI on the air.";
+    private const string VoicePartialCallsignResponse =
+        "{0} station, please say your full callsign again slowly. This is {1}.";
 
     private Thread? _agentThread;
     private volatile bool _running;
@@ -103,6 +106,11 @@ public class CqCallerAgent
     private int _qsosCompleted;
     private int _cqsSent;
     private DateTime _qsoStartedUtc;
+
+    // Retry state for voice callsign extraction
+    private int _repeatAttempts;
+    private string _accumulatedTranscriptions = "";
+    private const int MaxRepeatAttempts = 3;
 
     // Exchange parsing
     private string? _theirRst;
@@ -136,7 +144,8 @@ public class CqCallerAgent
         AudioPipeline audioPipeline,
         TransmitController txController,
         SsbPipeline ssbPipeline,
-        CwAiRescorer? aiRescorer = null)
+        CwAiRescorer? aiRescorer = null,
+        SsbAiCallsignExtractor? aiExtractor = null)
     {
         _radioManager = radioManager;
         _cwPipeline = cwPipeline;
@@ -144,6 +153,7 @@ public class CqCallerAgent
         _txController = txController;
         _ssbPipeline = ssbPipeline;
         _aiRescorer = aiRescorer;
+        _aiExtractor = aiExtractor;
     }
 
     public string Start(string callsign, string name, string qth,
@@ -270,6 +280,16 @@ public class CqCallerAgent
                     return $"Failed to start SSB pipeline: {result}";
             }
             _voiceTx = new VoiceTransmitter(_radioManager);
+
+            // Optimize Whisper prompt for CQ caller — emphasize phonetic callsign patterns
+            _ssbPipeline.Prompt =
+                "Ham radio CQ call response. Stations reply with their callsign using NATO phonetics. " +
+                "Phonetic alphabet: Alpha, Bravo, Charlie, Delta, Echo, Foxtrot, Golf, Hotel, " +
+                "India, Juliett, Kilo, Lima, Mike, November, Oscar, Papa, Quebec, Romeo, " +
+                "Sierra, Tango, Uniform, Victor, Whiskey, Xray, Yankee, Zulu. " +
+                "Numbers: Zero, One, Two, Three, Four, Five, Six, Seven, Eight, Niner. " +
+                "Callsign format: letter-number-letters like Kilo One Alpha Foxtrot = K1AF. " +
+                "Common phrases: CQ, QRZ, you're 59, copy, roger, 73, over, this is, calling.";
         }
 
         _running = true;
@@ -282,6 +302,8 @@ public class CqCallerAgent
         _lastDecodedText = null;
         _lastSentText = null;
         _lastError = null;
+        _repeatAttempts = 0;
+        _accumulatedTranscriptions = "";
 
         lock (_lock)
         {
@@ -612,7 +634,18 @@ public class CqCallerAgent
     {
         lock (_lock) { _lastDecodedText = decoded; }
 
-        var callsigns = CallsignDetector.ExtractCallsigns(decoded);
+        // Accumulate transcriptions across retries for better AI extraction
+        if (_mode == CqCallerMode.Voice && !string.IsNullOrWhiteSpace(decoded) && decoded != "(no speech detected)")
+        {
+            _accumulatedTranscriptions = string.IsNullOrEmpty(_accumulatedTranscriptions)
+                ? decoded
+                : _accumulatedTranscriptions + " " + decoded;
+        }
+
+        var textToAnalyze = _mode == CqCallerMode.Voice ? _accumulatedTranscriptions : decoded;
+
+        // Multi-stage callsign extraction pipeline
+        var callsigns = ExtractCallsignsMultiStage(textToAnalyze);
         callsigns.RemoveAll(c => c.Equals(_myCallsign, StringComparison.OrdinalIgnoreCase));
         callsigns = callsigns.Where(c => CallsignPattern.IsMatch(c)).ToList();
 
@@ -621,15 +654,40 @@ public class CqCallerAgent
             // If we decoded something but no callsigns, someone may be talking but unintelligible
             if (_mode == CqCallerMode.Voice && decoded.Trim().Length > 5 && decoded != "(no speech detected)")
             {
-                LogStatus($"Decoded: \"{Truncate(decoded, 60)}\" — unintelligible, requesting repeat.");
-                var myPhonetic = CallsignToPhonetic(_myCallsign);
-                SendVoiceOnly(string.Format(VoiceUnintelligibleResponse, myPhonetic));
-                ClearDecodeBuffer();
-                TransitionTo(CqCallerStage.Listening);
+                if (_repeatAttempts < MaxRepeatAttempts)
+                {
+                    _repeatAttempts++;
+
+                    // Try to extract partial phonetic characters to echo back
+                    var (partialChars, partialPhonetic) = CallsignDetector.ExtractPartialPhonetics(textToAnalyze);
+                    var myPhonetic = CallsignToPhonetic(_myCallsign);
+
+                    if (partialChars.Length >= 1 && !string.IsNullOrWhiteSpace(partialPhonetic))
+                    {
+                        // Echo back what we heard: "Kilo One station, say your full callsign again"
+                        LogStatus($"Decoded: \"{Truncate(decoded, 60)}\" — partial: {partialChars} (attempt {_repeatAttempts}/{MaxRepeatAttempts})");
+                        SendVoiceOnly(string.Format(VoicePartialCallsignResponse, partialPhonetic, myPhonetic));
+                    }
+                    else
+                    {
+                        LogStatus($"Decoded: \"{Truncate(decoded, 60)}\" — no callsign found (attempt {_repeatAttempts}/{MaxRepeatAttempts}), requesting repeat.");
+                        SendVoiceOnly(string.Format(VoiceUnintelligibleResponse, myPhonetic));
+                    }
+
+                    // Don't clear decode buffer — let text accumulate for better extraction
+                    TransitionTo(CqCallerStage.Listening);
+                }
+                else
+                {
+                    LogStatus($"Decoded: \"{Truncate(decoded, 60)}\" — giving up after {MaxRepeatAttempts} attempts.");
+                    ResetRetryState();
+                    TransitionTo(CqCallerStage.NoCaller);
+                }
             }
             else
             {
                 LogStatus($"Decoded: \"{Truncate(decoded, 60)}\" — no valid callsigns found.");
+                ResetRetryState();
                 TransitionTo(CqCallerStage.NoCaller);
             }
         }
@@ -639,6 +697,7 @@ public class CqCallerAgent
             _qsoStartedUtc = DateTime.UtcNow;
             _questionsAnswered = 0;
             LogStatus($"Single caller: {_currentCaller}");
+            ResetRetryState();
             TransitionTo(CqCallerStage.SingleCaller);
         }
         else
@@ -646,8 +705,52 @@ public class CqCallerAgent
             LogStatus($"Pileup detected! {callsigns.Count} callers: {string.Join(", ", callsigns)}");
             _pileupAttempt = 0;
             _currentCaller = null;
+            ResetRetryState();
             TransitionTo(CqCallerStage.Pileup);
         }
+    }
+
+    /// <summary>
+    /// Multi-stage callsign extraction: regex → phonetics → AI fallback.
+    /// </summary>
+    private List<string> ExtractCallsignsMultiStage(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return [];
+
+        // Stage 1 & 2: Direct regex + phonetic conversion (handled by ExtractCallsignsWithPhonetics)
+        var callsigns = CallsignDetector.ExtractCallsignsWithPhonetics(text);
+        if (callsigns.Count > 0)
+        {
+            var source = CallsignDetector.ExtractCallsigns(text).Count > 0 ? "regex" : "phonetic";
+            LogStatus($"Callsign extracted via {source}: {string.Join(", ", callsigns)}");
+            return callsigns;
+        }
+
+        // Stage 3: AI extraction (if API key available)
+        if (_aiExtractor != null)
+        {
+            try
+            {
+                var aiCallsign = _aiExtractor.ExtractCallsignAsync(text).GetAwaiter().GetResult();
+                if (!string.IsNullOrWhiteSpace(aiCallsign))
+                {
+                    LogStatus($"Callsign extracted via AI: {aiCallsign}");
+                    return [aiCallsign];
+                }
+            }
+            catch (Exception ex)
+            {
+                LogStatus($"AI callsign extraction error: {ex.Message}");
+            }
+        }
+
+        return [];
+    }
+
+    private void ResetRetryState()
+    {
+        _repeatAttempts = 0;
+        _accumulatedTranscriptions = "";
     }
 
     private void HandlePileup()
@@ -796,6 +899,8 @@ public class CqCallerAgent
 
     private void SendCq()
     {
+        ResetRetryState();
+
         var phonetic = CallsignToPhonetic(_myCallsign);
         var cwText = string.Format(CwCqTemplate, _myCallsign);
         var voiceText = string.Format(VoiceCqTemplate, phonetic, _myCallsign);
@@ -940,6 +1045,7 @@ public class CqCallerAgent
         _theirRst = null;
         _theirName = null;
         _theirQth = null;
+        ResetRetryState();
     }
 
     // ── Question detection and context-aware responses ─────────────
@@ -948,6 +1054,7 @@ public class CqCallerAgent
 
     /// <summary>
     /// Detect common questions in decoded speech and send appropriate responses.
+    /// Falls back to AI-generated conversational responses for unrecognized questions.
     /// Returns true if a question was detected and answered.
     /// </summary>
     private bool DetectAndRespondToQuestion(string decoded)
@@ -955,13 +1062,15 @@ public class CqCallerAgent
         if (string.IsNullOrWhiteSpace(decoded) || decoded == "(no speech detected)")
             return false;
 
-        // Limit to 2 question responses per QSO to avoid infinite loops
-        if (_questionsAnswered >= 2)
+        // Limit to 4 question responses per QSO to allow natural conversation
+        if (_questionsAnswered >= 4)
             return false;
 
         var upper = decoded.ToUpperInvariant();
         var callerRef = _currentCaller != null ? CallsignToPhonetic(_currentCaller) : "station";
         var myPhonetic = CallsignToPhonetic(_myCallsign);
+
+        // Fast-path: hardcoded responses for common questions
 
         // Detect legality / FCC questions
         if (ContainsAny(upper, "LEGAL", "FCC", "ALLOWED", "LICENSED", "LICENSE", "COMPLY", "COMPLIANCE", "RULES", "PART 97", "CONTROL OPERATOR"))
@@ -1001,7 +1110,45 @@ public class CqCallerAgent
             return false; // Let normal flow resend
         }
 
+        // AI conversational fallback — handle casual chat, jokes, general questions
+        if (_aiExtractor != null && decoded.Trim().Length > 10 && LooksConversational(upper))
+        {
+            try
+            {
+                var aiResponse = _aiExtractor.GenerateConversationalResponseAsync(
+                    decoded, _myCallsign, _myName, _myQth, _currentCaller)
+                    .GetAwaiter().GetResult();
+
+                if (!string.IsNullOrWhiteSpace(aiResponse))
+                {
+                    LogStatus($"AI conversational response to: \"{Truncate(decoded, 40)}\"");
+                    SendVoiceOnly(aiResponse);
+                    _questionsAnswered++;
+                    return true;
+                }
+            }
+            catch (Exception ex)
+            {
+                LogStatus($"AI conversation error: {ex.Message}");
+            }
+        }
+
         return false;
+    }
+
+    /// <summary>
+    /// Heuristic: does the text look conversational rather than just a callsign/exchange?
+    /// </summary>
+    private static bool LooksConversational(string upperText)
+    {
+        // If it contains question-like words or is longer than a typical exchange
+        if (upperText.Contains('?')) return true;
+        if (ContainsAny(upperText, "WHAT", "WHERE", "HOW", "WHY", "TELL", "CAN YOU",
+            "DO YOU", "ARE YOU", "HAVE YOU", "WOULD", "COULD", "SHOULD",
+            "THINK", "KNOW", "LIKE", "ENJOY", "FAVORITE", "OPINION"))
+            return true;
+        // Long decoded text that isn't just signal reports
+        return upperText.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length > 8;
     }
 
     private void SendVoiceOnly(string text)

@@ -1,0 +1,904 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SmartSDR MCP Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&display=swap" rel="stylesheet" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.7/signalr.min.js"></script>
+    <style>
+        * { font-family: 'JetBrains Mono', monospace; }
+        body { background: #0a0e17; color: #c0c8d8; margin: 0; overflow-x: hidden; }
+
+        /* CRT scanline overlay */
+        body::after {
+            content: '';
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: repeating-linear-gradient(
+                0deg,
+                rgba(0,255,65,0.015) 0px,
+                rgba(0,255,65,0.015) 1px,
+                transparent 1px,
+                transparent 3px
+            );
+            pointer-events: none;
+            z-index: 9999;
+        }
+
+        /* Grid background */
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-image:
+                linear-gradient(rgba(0,255,65,0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0,255,65,0.03) 1px, transparent 1px);
+            background-size: 40px 40px;
+            pointer-events: none;
+            z-index: 0;
+        }
+
+        .panel {
+            background: rgba(15,25,40,0.8);
+            border: 1px solid rgba(0,255,65,0.15);
+            border-radius: 6px;
+            box-shadow: 0 0 15px rgba(0,255,65,0.05), inset 0 0 30px rgba(0,0,0,0.3);
+        }
+        .panel-header {
+            color: #00ff41;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            padding: 8px 12px 4px;
+            text-shadow: 0 0 8px rgba(0,255,65,0.5);
+            border-bottom: 1px solid rgba(0,255,65,0.1);
+        }
+
+        .lcd-freq {
+            font-size: 28px;
+            font-weight: 700;
+            color: #00ff41;
+            text-shadow: 0 0 20px rgba(0,255,65,0.6), 0 0 40px rgba(0,255,65,0.3);
+            letter-spacing: 2px;
+        }
+
+        .val-green { color: #00ff41; text-shadow: 0 0 6px rgba(0,255,65,0.4); }
+        .val-cyan { color: #00d4ff; text-shadow: 0 0 6px rgba(0,212,255,0.4); }
+        .val-amber { color: #ff9800; text-shadow: 0 0 6px rgba(255,152,0,0.4); }
+        .val-red { color: #ff3333; text-shadow: 0 0 6px rgba(255,51,51,0.4); }
+        .label-dim { color: #4a5568; font-size: 10px; text-transform: uppercase; letter-spacing: 1px; }
+
+        .tx-pulse {
+            animation: txPulse 0.8s ease-in-out infinite alternate;
+        }
+        @keyframes txPulse {
+            from { box-shadow: 0 0 5px rgba(255,51,51,0.5); }
+            to { box-shadow: 0 0 25px rgba(255,51,51,0.9), 0 0 50px rgba(255,51,51,0.4); }
+        }
+
+        .glow-dot {
+            width: 8px; height: 8px; border-radius: 50%; display: inline-block;
+        }
+        .glow-dot-green { background: #00ff41; box-shadow: 0 0 8px #00ff41; }
+        .glow-dot-red { background: #ff3333; box-shadow: 0 0 8px #ff3333; }
+        .glow-dot-amber { background: #ff9800; box-shadow: 0 0 8px #ff9800; }
+        .glow-dot-off { background: #1a2332; box-shadow: none; border: 1px solid #2d3748; }
+
+        .terminal-log {
+            font-size: 11px;
+            line-height: 1.5;
+            color: #00ff41;
+            text-shadow: 0 0 4px rgba(0,255,65,0.3);
+            overflow-y: auto;
+            mask-image: linear-gradient(to bottom, transparent 0%, black 15%, black 100%);
+            -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 15%, black 100%);
+        }
+
+        .stage-node {
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 9px;
+            font-weight: 600;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+        .stage-active {
+            background: rgba(0,255,65,0.15);
+            border: 1px solid #00ff41;
+            color: #00ff41;
+            box-shadow: 0 0 10px rgba(0,255,65,0.3);
+        }
+        .stage-inactive {
+            background: rgba(26,35,50,0.6);
+            border: 1px solid #2d3748;
+            color: #4a5568;
+        }
+
+        .bar-bg { background: #1a2332; border-radius: 2px; height: 6px; overflow: hidden; }
+        .bar-fill-green { background: linear-gradient(90deg, #00ff41, #00cc33); height: 100%; transition: width 0.3s; }
+        .bar-fill-amber { background: linear-gradient(90deg, #ff9800, #ff6600); height: 100%; transition: width 0.3s; }
+        .bar-fill-red { background: linear-gradient(90deg, #ff3333, #cc0000); height: 100%; transition: width 0.3s; }
+
+        .kill-btn {
+            background: linear-gradient(180deg, #1a0000, #330000);
+            border: 2px solid #ff3333;
+            color: #ff3333;
+            font-weight: 700;
+            font-size: 11px;
+            letter-spacing: 2px;
+            padding: 6px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            text-shadow: 0 0 6px rgba(255,51,51,0.5);
+            transition: all 0.2s;
+        }
+        .kill-btn:hover { background: #330000; box-shadow: 0 0 20px rgba(255,51,51,0.4); }
+        .kill-btn-start {
+            background: linear-gradient(180deg, #001a00, #003300);
+            border: 2px solid #00ff41;
+            color: #00ff41;
+            text-shadow: 0 0 6px rgba(0,255,65,0.5);
+        }
+        .kill-btn-start:hover { background: #003300; box-shadow: 0 0 20px rgba(0,255,65,0.4); }
+
+        .speaker-1 { color: #00ff41; }
+        .speaker-2 { color: #ff9800; }
+        .speaker-3 { color: #00d4ff; }
+        .speaker-4 { color: #e040fb; }
+        .speaker-5 { color: #ffeb3b; }
+        .speaker-default { color: #78909c; }
+
+        .qso-row:hover { background: rgba(0,255,65,0.05); }
+        .qso-row:nth-child(odd) { background: rgba(255,255,255,0.02); }
+
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(0,255,65,0.2); border-radius: 2px; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // --- SignalR Connection ---
+        const connection = new signalR.HubConnectionBuilder()
+            .withUrl("/dashboard-hub")
+            .withAutomaticReconnect([0, 1000, 2000, 5000, 10000])
+            .build();
+
+        function formatFreq(mhz) {
+            if (!mhz || mhz === 0) return "-.---.---";
+            const s = mhz.toFixed(6);
+            const parts = s.split('.');
+            const integer = parts[0];
+            const decimal = parts[1] || '000000';
+            return `${integer}.${decimal.slice(0,3)}.${decimal.slice(3,6)}`;
+        }
+
+        function formatTime(utcStr) {
+            if (!utcStr) return "--:--";
+            const d = new Date(utcStr);
+            return d.toUTCString().slice(17, 22);
+        }
+
+        function sValue(dbm) {
+            if (dbm === undefined || dbm === null) return { text: "S0", num: 0 };
+            // S-meter: S1=-121, S9=-73, each S unit is 6dB
+            if (dbm <= -127) return { text: "S0", num: 0 };
+            if (dbm <= -121) return { text: "S1", num: 1 };
+            if (dbm <= -115) return { text: "S2", num: 2 };
+            if (dbm <= -109) return { text: "S3", num: 3 };
+            if (dbm <= -103) return { text: "S4", num: 4 };
+            if (dbm <= -97) return { text: "S5", num: 5 };
+            if (dbm <= -91) return { text: "S6", num: 6 };
+            if (dbm <= -85) return { text: "S7", num: 7 };
+            if (dbm <= -79) return { text: "S8", num: 8 };
+            if (dbm <= -73) return { text: "S9", num: 9 };
+            const over = Math.round(dbm + 73);
+            return { text: `S9+${over}`, num: 9 + over/10 };
+        }
+
+        // --- Components ---
+
+        function Header({ data, onConnect }) {
+            const radio = data?.radio;
+            const isTx = radio?.isTransmitting;
+            const callsign = data?.agent?.myCallsign || "K1AF";
+            const mode = radio?.mode || "N/A";
+            const isConnected = radio?.connected;
+
+            return (
+                <div className="panel flex items-center justify-between px-4 py-2 mb-2">
+                    <div className="flex items-center gap-4">
+                        <div className="flex items-center gap-2">
+                            <span className={`glow-dot ${isConnected ? 'glow-dot-green' : 'glow-dot-red'}`}></span>
+                            <span className="val-green text-lg font-bold tracking-widest">{callsign}</span>
+                        </div>
+                        <div className="lcd-freq">{formatFreq(radio?.frequencyMHz)}</div>
+                        <span className="px-2 py-0.5 rounded text-xs font-bold border"
+                              style={{
+                                  borderColor: mode === 'CW' ? '#00d4ff' : '#ff9800',
+                                  color: mode === 'CW' ? '#00d4ff' : '#ff9800',
+                                  background: mode === 'CW' ? 'rgba(0,212,255,0.1)' : 'rgba(255,152,0,0.1)'
+                              }}>
+                            {mode}
+                        </span>
+                    </div>
+                    <div className="flex items-center gap-4">
+                        {isTx ? (
+                            <div className="tx-pulse px-3 py-1 rounded text-xs font-bold"
+                                 style={{ background: 'rgba(255,51,51,0.2)', border: '1px solid #ff3333', color: '#ff3333' }}>
+                                TRANSMITTING
+                            </div>
+                        ) : (
+                            <div className="px-3 py-1 rounded text-xs font-bold"
+                                 style={{ background: 'rgba(0,255,65,0.1)', border: '1px solid rgba(0,255,65,0.3)', color: '#00ff41' }}>
+                                RX
+                            </div>
+                        )}
+                        {!isConnected ? (
+                            <button className="kill-btn kill-btn-start" onClick={onConnect}>CONNECT</button>
+                        ) : (
+                            <div className="px-3 py-1 rounded text-xs font-bold"
+                                 style={{ background: 'rgba(0,255,65,0.1)', border: '1px solid rgba(0,255,65,0.3)', color: '#00ff41' }}>
+                                CONNECTED
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        function AgentPanel({ agent }) {
+            const stages = ['Idle','CallingCq','Listening','NoCaller','SingleCaller',
+                           'SendingExchange','ReceivingExchange','Confirming','Pileup',
+                           'SendingPartial','ListeningForPartial'];
+            const currentStage = agent?.stage || 'Idle';
+
+            return (
+                <div className="panel flex flex-col h-full">
+                    <div className="panel-header">Agent</div>
+                    <div className="p-3 flex-1 flex flex-col gap-2">
+                        <div className="flex flex-wrap gap-1">
+                            {stages.map(s => (
+                                <span key={s} className={`stage-node ${s === currentStage ? 'stage-active' : 'stage-inactive'}`}>
+                                    {s.replace(/([A-Z])/g, ' $1').trim()}
+                                </span>
+                            ))}
+                        </div>
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-1 mt-2 text-xs">
+                            <div><span className="label-dim">CQs</span> <span className="val-green">{agent?.cqsSent || 0}</span></div>
+                            <div><span className="label-dim">QSOs</span> <span className="val-green">{agent?.qsosCompleted || 0}</span></div>
+                            <div><span className="label-dim">Mode</span> <span className="val-cyan">{agent?.mode || 'Voice'}</span></div>
+                            <div><span className="label-dim">Pileup</span> <span className="val-amber">#{agent?.pileupAttempt || 0}</span></div>
+                        </div>
+                        {agent?.currentCaller && (
+                            <div className="text-xs mt-1">
+                                <span className="label-dim">Caller</span>{' '}
+                                <span className="val-green font-bold text-sm">{agent.currentCaller}</span>
+                            </div>
+                        )}
+                        {agent?.partialCallsign && (
+                            <div className="text-xs">
+                                <span className="label-dim">Partial</span>{' '}
+                                <span className="val-amber">{agent.partialCallsign}?</span>
+                            </div>
+                        )}
+                        {agent?.lastError && (
+                            <div className="text-xs text-red-400 mt-1 truncate">{agent.lastError}</div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        function RadioPanel({ radio }) {
+            const meters = radio?.meters || {};
+            const sMeterKey = Object.keys(meters).find(k => k.startsWith('S-METER'));
+            const sMeterDbm = sMeterKey ? meters[sMeterKey] : undefined;
+            const sv = sValue(sMeterDbm);
+            const swr = meters['SWR'] || 1.0;
+            const fwdPwr = meters['FWDPWR'] || 0;
+            const paTemp = meters['PATEMP'] || 0;
+            const volts = meters['VOLTS'] || 0;
+
+            // S-meter bar: 0 to ~15 (S9+60)
+            const sBarPct = Math.min(100, (sv.num / 15) * 100);
+
+            return (
+                <div className="panel flex flex-col h-full">
+                    <div className="panel-header">Radio</div>
+                    <div className="p-3 flex-1 flex flex-col gap-2">
+                        <div className="flex items-center justify-between text-xs">
+                            <span className="val-cyan font-bold">{radio?.radioName || 'N/A'}</span>
+                            <span className={`glow-dot ${radio?.connected ? 'glow-dot-green' : 'glow-dot-red'}`}></span>
+                        </div>
+                        <div className="text-xs"><span className="label-dim">Model</span> <span className="val-green">{radio?.radioModel || 'N/A'}</span></div>
+
+                        {/* S-Meter */}
+                        <div>
+                            <div className="flex justify-between text-xs mb-1">
+                                <span className="label-dim">S-Meter</span>
+                                <span className={sv.num > 9 ? 'val-red font-bold' : sv.num > 6 ? 'val-amber' : 'val-green'}>{sv.text}</span>
+                            </div>
+                            <SMeter value={sv.num} />
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
+                            <div><span className="label-dim">PWR</span> <span className="val-green">{radio?.rfPower || 0}W</span></div>
+                            <div><span className="label-dim">SWR</span> <span className={swr > 2 ? 'val-red' : 'val-green'}>{swr.toFixed(1)}</span></div>
+                            <div><span className="label-dim">FWD</span> <span className="val-green">{fwdPwr.toFixed(0)}W</span></div>
+                            <div><span className="label-dim">Temp</span> <span className={paTemp > 50 ? 'val-amber' : 'val-green'}>{paTemp.toFixed(0)}C</span></div>
+                            <div><span className="label-dim">Volts</span> <span className="val-green">{volts.toFixed(1)}V</span></div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        function SMeter({ value }) {
+            // SVG arc meter
+            const width = 200;
+            const height = 70;
+            const cx = 100;
+            const cy = 65;
+            const r = 55;
+            const startAngle = Math.PI;
+            const endAngle = 0;
+
+            const marks = [];
+            for (let i = 0; i <= 9; i++) {
+                const angle = startAngle - (i / 15) * Math.PI;
+                const x1 = cx + (r - 5) * Math.cos(angle);
+                const y1 = cy - (r - 5) * Math.sin(angle);
+                const x2 = cx + (r + 2) * Math.cos(angle);
+                const y2 = cy - (r + 2) * Math.sin(angle);
+                const lx = cx + (r + 10) * Math.cos(angle);
+                const ly = cy - (r + 10) * Math.sin(angle);
+                marks.push(
+                    <g key={`s${i}`}>
+                        <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#4a5568" strokeWidth="1" />
+                        {i % 3 === 0 && <text x={lx} y={ly} fill="#4a5568" fontSize="7" textAnchor="middle" dominantBaseline="middle">S{i}</text>}
+                    </g>
+                );
+            }
+            // +20, +40, +60
+            for (let over = 20; over <= 60; over += 20) {
+                const sNum = 9 + over / 10;
+                const angle = startAngle - (sNum / 15) * Math.PI;
+                const x1 = cx + (r - 5) * Math.cos(angle);
+                const y1 = cy - (r - 5) * Math.sin(angle);
+                const x2 = cx + (r + 2) * Math.cos(angle);
+                const y2 = cy - (r + 2) * Math.sin(angle);
+                const lx = cx + (r + 10) * Math.cos(angle);
+                const ly = cy - (r + 10) * Math.sin(angle);
+                marks.push(
+                    <g key={`o${over}`}>
+                        <line x1={x1} y1={y1} x2={x2} y2={y2} stroke="#ff3333" strokeWidth="1" />
+                        <text x={lx} y={ly} fill="#ff3333" fontSize="6" textAnchor="middle" dominantBaseline="middle">+{over}</text>
+                    </g>
+                );
+            }
+
+            // Needle
+            const needleVal = Math.min(15, Math.max(0, value));
+            const needleAngle = startAngle - (needleVal / 15) * Math.PI;
+            const nx = cx + r * Math.cos(needleAngle);
+            const ny = cy - r * Math.sin(needleAngle);
+
+            // Arc background
+            const arcPath = `M ${cx - r} ${cy} A ${r} ${r} 0 0 1 ${cx + r} ${cy}`;
+
+            return (
+                <svg width="100%" viewBox="0 0 200 85" style={{ maxHeight: '70px' }}>
+                    <path d={arcPath} fill="none" stroke="#1a2332" strokeWidth="8" />
+                    {/* Green arc up to S9 */}
+                    <path d={arcPath} fill="none" stroke="url(#smeterGrad)" strokeWidth="4"
+                          strokeDasharray={`${Math.min(needleVal / 15 * Math.PI * r, Math.PI * r)} ${Math.PI * r}`} />
+                    <defs>
+                        <linearGradient id="smeterGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                            <stop offset="0%" stopColor="#00ff41" />
+                            <stop offset="60%" stopColor="#00ff41" />
+                            <stop offset="75%" stopColor="#ff9800" />
+                            <stop offset="100%" stopColor="#ff3333" />
+                        </linearGradient>
+                    </defs>
+                    {marks}
+                    <line x1={cx} y1={cy} x2={nx} y2={ny} stroke="#00ff41" strokeWidth="1.5"
+                          style={{ filter: 'drop-shadow(0 0 3px rgba(0,255,65,0.6))' }} />
+                    <circle cx={cx} cy={cy} r="3" fill="#00ff41" />
+                </svg>
+            );
+        }
+
+        function TranscriptionPanel({ cw, ssb }) {
+            const [tab, setTab] = useState('ssb');
+            const logRef = useRef(null);
+
+            useEffect(() => {
+                if (logRef.current) {
+                    logRef.current.scrollTop = logRef.current.scrollHeight;
+                }
+            }, [cw, ssb, tab]);
+
+            const speakerClass = (speaker, idx) => {
+                const num = parseInt(speaker?.replace(/\D/g, '')) || (idx % 5) + 1;
+                if (num <= 5) return `speaker-${num}`;
+                return 'speaker-default';
+            };
+
+            return (
+                <div className="panel flex flex-col h-full">
+                    <div className="panel-header flex items-center gap-2">
+                        <span>Intercept</span>
+                        <div className="ml-auto flex gap-1">
+                            <button onClick={() => setTab('cw')}
+                                    className={`px-2 py-0.5 rounded text-[9px] font-bold border ${tab === 'cw' ? 'border-cyan-400 text-cyan-400 bg-cyan-900/20' : 'border-gray-700 text-gray-500'}`}>
+                                CW
+                            </button>
+                            <button onClick={() => setTab('ssb')}
+                                    className={`px-2 py-0.5 rounded text-[9px] font-bold border ${tab === 'ssb' ? 'border-amber-400 text-amber-400 bg-amber-900/20' : 'border-gray-700 text-gray-500'}`}>
+                                SSB
+                            </button>
+                            <button onClick={() => connection?.invoke("ToggleAiRescore")}
+                                    className={`px-2 py-0.5 rounded text-[9px] font-bold border ${cw?.aiRunning ? 'border-green-400 text-green-400 bg-green-900/20' : 'border-gray-700 text-gray-500'}`}
+                                    title="Toggle AI CW rescoring">
+                                AI
+                            </button>
+                            <button onClick={() => connection?.invoke("ClearIntercept")}
+                                    className="px-2 py-0.5 rounded text-[9px] font-bold border border-red-700 text-red-400 hover:bg-red-900/30"
+                                    title="Clear transcript">
+                                CLR
+                            </button>
+                        </div>
+                    </div>
+                    <div ref={logRef} className="terminal-log p-3 flex-1" style={{ maxHeight: '200px' }}>
+                        {tab === 'cw' ? (
+                            <div>
+                                {cw?.running ? (
+                                    <div>
+                                        <div className="whitespace-pre-wrap break-all">{cw?.liveText || '(listening...)'}</div>
+                                        {cw?.neuralRunning && cw?.neuralText ? (
+                                            <div className="mt-2 pt-2 border-t border-purple-900/40">
+                                                <span className="text-[9px] font-bold text-purple-400 mr-1">NEURAL:</span>
+                                                {cw.neuralMessageType && cw.neuralMessageType !== 'Unknown' ? (
+                                                    <span className={`text-[8px] font-bold px-1 py-0.5 rounded mr-1 ${
+                                                        cw.neuralMessageType === 'CqCall' ? 'bg-yellow-900/60 text-yellow-300' :
+                                                        cw.neuralMessageType === 'DirectCall' ? 'bg-red-900/60 text-red-300' :
+                                                        cw.neuralMessageType === 'Exchange' ? 'bg-blue-900/60 text-blue-300' :
+                                                        cw.neuralMessageType === 'Closing' ? 'bg-green-900/60 text-green-300' :
+                                                        'bg-gray-800 text-gray-400'
+                                                    }`}>{cw.neuralMessageType === 'CqCall' ? 'CQ' :
+                                                         cw.neuralMessageType === 'DirectCall' ? 'DIRECT' :
+                                                         cw.neuralMessageType === 'Exchange' ? 'XCHG' :
+                                                         cw.neuralMessageType === 'Closing' ? '73' :
+                                                         cw.neuralMessageType}</span>
+                                                ) : null}
+                                                <span className="whitespace-pre-wrap break-all text-purple-300">
+                                                    {(() => {
+                                                        const callsigns = cw.neuralCallsigns || [];
+                                                        if (callsigns.length === 0) return cw.neuralText;
+                                                        let text = cw.neuralText;
+                                                        const parts = [];
+                                                        let remaining = text;
+                                                        callsigns.forEach(cs => {
+                                                            const idx = remaining.indexOf(cs);
+                                                            if (idx >= 0) {
+                                                                if (idx > 0) parts.push({ text: remaining.slice(0, idx), isCallsign: false });
+                                                                parts.push({ text: cs, isCallsign: true });
+                                                                remaining = remaining.slice(idx + cs.length);
+                                                            }
+                                                        });
+                                                        if (remaining) parts.push({ text: remaining, isCallsign: false });
+                                                        if (parts.length === 0) return cw.neuralText;
+                                                        return parts.map((p, i) =>
+                                                            p.isCallsign
+                                                                ? React.createElement('span', { key: i, className: 'font-bold text-purple-100 bg-purple-900/40 px-0.5 rounded' }, p.text)
+                                                                : React.createElement('span', { key: i }, p.text)
+                                                        );
+                                                    })()}
+                                                </span>
+                                            </div>
+                                        ) : null}
+                                        {cw?.aiRunning && cw?.aiText ? (
+                                            <div className="mt-2 pt-2 border-t border-green-900/40">
+                                                <span className="text-[9px] font-bold text-green-500 mr-1">AI:</span>
+                                                <span className="whitespace-pre-wrap break-all text-green-300">{cw.aiText}</span>
+                                            </div>
+                                        ) : null}
+                                    </div>
+                                ) : (
+                                    <div className="text-gray-600">(CW listener not running)</div>
+                                )}
+                            </div>
+                        ) : (
+                            <div>
+                                {ssb?.running ? (
+                                    ssb?.recentSegments?.length > 0 ? (
+                                        ssb.recentSegments.map((seg, i) => (
+                                            <div key={i} className="mb-0.5">
+                                                <span className={`font-bold ${speakerClass(seg.speaker, i)}`}>[{seg.speaker}]</span>{' '}
+                                                <span style={{ color: '#c0c8d8' }}>{seg.text}</span>
+                                            </div>
+                                        ))
+                                    ) : (
+                                        <div className="text-gray-600">(listening...)</div>
+                                    )
+                                ) : (
+                                    <div className="text-gray-600">(SSB listener not running)</div>
+                                )}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        function CwDetailsPanel({ cw }) {
+            const sigPct = Math.min(100, (cw?.signalRms || 0) * 5000);
+            const noisePct = Math.min(100, (cw?.noiseFloor || 0) * 500);
+
+            return (
+                <div className="panel flex flex-col h-full">
+                    <div className="panel-header">CW Decode</div>
+                    <div className="p-3 flex-1 flex flex-col gap-2">
+                        <div className="flex items-center justify-between text-xs">
+                            <span className="label-dim">WPM</span>
+                            <span className="val-green text-lg font-bold">{(cw?.wpm || 0).toFixed(0)}</span>
+                        </div>
+                        <div>
+                            <div className="flex justify-between text-xs mb-0.5">
+                                <span className="label-dim">Signal</span>
+                                <span className="val-green">{(cw?.signalRms || 0).toFixed(4)}</span>
+                            </div>
+                            <div className="bar-bg"><div className="bar-fill-green" style={{ width: `${sigPct}%` }}></div></div>
+                        </div>
+                        <div>
+                            <div className="flex justify-between text-xs mb-0.5">
+                                <span className="label-dim">Noise</span>
+                                <span className="val-amber">{(cw?.noiseFloor || 0).toFixed(4)}</span>
+                            </div>
+                            <div className="bar-bg"><div className="bar-fill-amber" style={{ width: `${noisePct}%` }}></div></div>
+                        </div>
+                        <div className="flex gap-4 text-xs mt-1">
+                            <div className="flex items-center gap-1">
+                                <span className="label-dim">Tone</span>
+                                <span className={`glow-dot ${cw?.tonePresent ? 'glow-dot-green' : 'glow-dot-off'}`}></span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                                <span className="label-dim">Gate</span>
+                                <span className={`glow-dot ${cw?.gateOpen ? 'glow-dot-green' : 'glow-dot-off'}`}></span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                                <span className="label-dim">Run</span>
+                                <span className={`glow-dot ${cw?.running ? 'glow-dot-green' : 'glow-dot-off'}`}></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        function AudioPanel({ audio }) {
+            const pct = Math.min(100, (audio?.levelRms || 0) * 300);
+            const barClass = pct > 80 ? 'bar-fill-red' : pct > 50 ? 'bar-fill-amber' : 'bar-fill-green';
+
+            return (
+                <div className="panel">
+                    <div className="panel-header">Audio</div>
+                    <div className="p-3 flex flex-col gap-2">
+                        <div className="flex items-center justify-between text-xs">
+                            <span className="label-dim">RMS Level</span>
+                            <span className="val-green">{(audio?.levelRms || 0).toFixed(4)}</span>
+                        </div>
+                        <div className="bar-bg"><div className={barClass} style={{ width: `${pct}%` }}></div></div>
+                        <div className="flex gap-4 text-xs">
+                            <div><span className="label-dim">DAX</span> <span className="val-cyan">{audio?.daxChannel ?? '-'}</span></div>
+                            <div className="flex items-center gap-1">
+                                <span className="label-dim">Run</span>
+                                <span className={`glow-dot ${audio?.running ? 'glow-dot-green' : 'glow-dot-off'}`}></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        function QsoLogPanel({ qsos }) {
+            return (
+                <div className="panel">
+                    <div className="panel-header">QSO Log</div>
+                    <div className="p-2 overflow-y-auto" style={{ maxHeight: '160px' }}>
+                        {(!qsos || qsos.length === 0) ? (
+                            <div className="text-gray-600 text-xs p-2">No QSOs logged yet</div>
+                        ) : (
+                            <table className="w-full text-xs">
+                                <thead>
+                                    <tr className="label-dim text-left">
+                                        <th className="pb-1 pr-2">Call</th>
+                                        <th className="pb-1 pr-2">RST</th>
+                                        <th className="pb-1 pr-2">Name</th>
+                                        <th className="pb-1 pr-2">QTH</th>
+                                        <th className="pb-1 pr-2">Band</th>
+                                        <th className="pb-1 pr-2">Mode</th>
+                                        <th className="pb-1">Time</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {qsos.map((q, i) => (
+                                        <tr key={i} className="qso-row">
+                                            <td className="py-0.5 pr-2 val-green font-bold">{q.theirCallsign}</td>
+                                            <td className="py-0.5 pr-2 val-cyan">{q.ourRst}/{q.theirRst}</td>
+                                            <td className="py-0.5 pr-2">{q.theirName || '-'}</td>
+                                            <td className="py-0.5 pr-2">{q.theirQth || '-'}</td>
+                                            <td className="py-0.5 pr-2 val-amber">{q.band}</td>
+                                            <td className="py-0.5 pr-2">{q.mode}</td>
+                                            <td className="py-0.5">{formatTime(q.completedUtc)}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        function StatusLogPanel({ statusLog }) {
+            const logRef = useRef(null);
+            useEffect(() => {
+                if (logRef.current) {
+                    logRef.current.scrollTop = logRef.current.scrollHeight;
+                }
+            }, [statusLog]);
+
+            return (
+                <div className="panel">
+                    <div className="panel-header">Comms Log</div>
+                    <div ref={logRef} className="terminal-log p-3" style={{ maxHeight: '140px', fontSize: '10px' }}>
+                        {(!statusLog || statusLog.length === 0) ? (
+                            <div className="text-gray-600">(no activity)</div>
+                        ) : (
+                            statusLog.map((line, i) => (
+                                <div key={i} className="mb-0.5">{line}</div>
+                            ))
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        function ToggleButton({ label, running, onStart, onStop }) {
+            const [busy, setBusy] = useState(false);
+            const [msg, setMsg] = useState('');
+            const handle = async () => {
+                setBusy(true); setMsg('');
+                try {
+                    const result = running ? await onStop() : await onStart();
+                    if (result && !result.toLowerCase().includes('started') &&
+                        !result.toLowerCase().includes('stopped') &&
+                        !result.toLowerCase().includes('already') &&
+                        !result.toLowerCase().startsWith('ok'))
+                        setMsg(result);
+                    else
+                        setMsg('');
+                } catch (e) { setMsg(e.message || 'Error'); }
+                finally { setBusy(false); }
+            };
+            return (
+                <div className="flex items-center gap-2">
+                    <button onClick={handle} disabled={busy}
+                            className={`text-[9px] font-bold px-2 py-1 rounded border transition-all ${busy ? 'opacity-50' : ''} ${
+                                running
+                                    ? 'border-red-500 text-red-400 bg-red-900/20 hover:bg-red-900/40'
+                                    : 'border-green-500 text-green-400 bg-green-900/20 hover:bg-green-900/40'
+                            }`}>
+                        {busy ? '...' : running ? 'STOP' : 'START'}
+                    </button>
+                    <span className={`glow-dot ${running ? 'glow-dot-green' : 'glow-dot-off'}`}></span>
+                    <span className="text-xs">{label}</span>
+                    {msg && <span className="text-[9px] val-red ml-1">{msg}</span>}
+                </div>
+            );
+        }
+
+        function ControlPanel({ data, onCqCallerStart }) {
+            const cw = data?.cw;
+            const ssb = data?.ssb;
+            const agents = data?.agents;
+            const agent = data?.agent;
+
+            return (
+                <div className="panel">
+                    <div className="panel-header">Controls</div>
+                    <div className="p-3 grid grid-cols-2 gap-x-6 gap-y-2">
+                        <div className="flex flex-col gap-2">
+                            <div className="label-dim text-[9px] mb-0.5">Listeners</div>
+                            <ToggleButton label="CW Listener" running={cw?.running}
+                                onStart={() => connection.invoke("StartCwListener")}
+                                onStop={() => connection.invoke("StopCwListener")} />
+                            <ToggleButton label="SSB Listener" running={ssb?.running}
+                                onStart={() => connection.invoke("StartSsbListener")}
+                                onStop={() => connection.invoke("StopSsbListener")} />
+                        </div>
+                        <div className="flex flex-col gap-2">
+                            <div className="label-dim text-[9px] mb-0.5">Agents</div>
+                            <ToggleButton label="CQ Caller" running={agent?.isRunning}
+                                onStart={() => { onCqCallerStart(); return Promise.resolve(''); }}
+                                onStop={() => connection.invoke("PauseAgent")} />
+                            <ToggleButton label="DX Hunter" running={agents?.dxHunter}
+                                onStart={() => connection.invoke("StartDxHunter", null, null)}
+                                onStop={() => connection.invoke("StopDxHunter")} />
+                            <ToggleButton label="DX Cluster" running={agents?.dxCluster}
+                                onStart={() => connection.invoke("StartDxCluster")}
+                                onStop={() => connection.invoke("StopDxCluster")} />
+                            <ToggleButton label="Band Scout" running={agents?.bandScout}
+                                onStart={() => connection.invoke("StartBandScout")}
+                                onStop={() => connection.invoke("StopBandScout")} />
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // --- Main App ---
+        function App() {
+            const [data, setData] = useState(null);
+            const [connected, setConnected] = useState(false);
+            const [showStartModal, setShowStartModal] = useState(false);
+            const [startError, setStartError] = useState('');
+            const [starting, setStarting] = useState(false);
+            const [startForm, setStartForm] = useState({
+                callsign: 'K1AF', name: 'PATRICK', qth: 'OLATHE KS', mode: 'voice', wpm: 20
+            });
+
+            useEffect(() => {
+                connection.on("dashboardUpdate", (snapshot) => {
+                    setData(snapshot);
+                });
+
+                connection.onreconnecting(() => setConnected(false));
+                connection.onreconnected(() => setConnected(true));
+                connection.onclose(() => setConnected(false));
+
+                connection.start()
+                    .then(() => setConnected(true))
+                    .catch(err => console.error("SignalR connect failed:", err));
+
+                return () => connection.stop();
+            }, []);
+
+            const [connectMsg, setConnectMsg] = useState('');
+            const [connecting, setConnecting] = useState(false);
+
+            const handleConnect = async () => {
+                setConnecting(true); setConnectMsg('');
+                try {
+                    const result = await connection.invoke("ConnectRadio");
+                    if (result && !result.toLowerCase().includes('connected'))
+                        setConnectMsg(result);
+                } catch (e) { setConnectMsg(e.message || 'Error'); }
+                finally { setConnecting(false); }
+            };
+
+            const handleCqCallerStart = () => {
+                setStartError('');
+                setShowStartModal(true);
+            };
+
+            const handleStartSubmit = async () => {
+                setStartError('');
+                setStarting(true);
+                try {
+                    const result = await connection.invoke("ResumeAgent",
+                        startForm.callsign, startForm.name, startForm.qth,
+                        startForm.mode, parseInt(startForm.wpm));
+                    if (result && !result.toLowerCase().startsWith('ok') && !result.toLowerCase().includes('started')) {
+                        setStartError(result);
+                    } else {
+                        setShowStartModal(false);
+                    }
+                } catch (e) {
+                    setStartError(e.message || 'Connection error');
+                } finally {
+                    setStarting(false);
+                }
+            };
+
+            return (
+                <div className="relative z-10 max-w-[1400px] mx-auto p-3">
+                    {/* Connection indicator */}
+                    <div className="fixed top-2 right-3 z-50 flex items-center gap-1 text-[9px]">
+                        <span className={`glow-dot ${connected ? 'glow-dot-green' : 'glow-dot-red'}`}></span>
+                        <span className={connected ? 'val-green' : 'val-red'}>{connected ? 'LIVE' : 'OFFLINE'}</span>
+                    </div>
+
+                    <Header data={data} onConnect={connecting ? () => {} : handleConnect} />
+
+                    {/* Main grid */}
+                    <div className="grid grid-cols-2 gap-2 mb-2">
+                        <AgentPanel agent={data?.agent} />
+                        <RadioPanel radio={data?.radio} />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 mb-2">
+                        <TranscriptionPanel cw={data?.cw} ssb={data?.ssb} />
+                        <div className="flex flex-col gap-2">
+                            <CwDetailsPanel cw={data?.cw} />
+                            <AudioPanel audio={data?.audio} />
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 mb-2">
+                        <QsoLogPanel qsos={data?.qsos} />
+                        <ControlPanel data={data} onCqCallerStart={handleCqCallerStart} />
+                    </div>
+                    <StatusLogPanel statusLog={data?.agent?.statusLog} />
+
+                    {/* Start modal */}
+                    {showStartModal && (
+                        <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: 'rgba(0,0,0,0.8)' }}>
+                            <div className="panel p-6 w-[400px]">
+                                <div className="panel-header mb-4">Start CQ Caller</div>
+                                <div className="flex flex-col gap-3">
+                                    {[
+                                        { label: 'Callsign', key: 'callsign' },
+                                        { label: 'Name', key: 'name' },
+                                        { label: 'QTH', key: 'qth' },
+                                    ].map(({ label, key }) => (
+                                        <div key={key}>
+                                            <label className="label-dim block mb-1">{label}</label>
+                                            <input value={startForm[key]}
+                                                   onChange={e => setStartForm({ ...startForm, [key]: e.target.value })}
+                                                   className="w-full bg-[#0a0e17] border border-gray-700 rounded px-3 py-1.5 text-sm val-green focus:border-green-500 focus:outline-none" />
+                                        </div>
+                                    ))}
+                                    <div className="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label className="label-dim block mb-1">Mode</label>
+                                            <select value={startForm.mode}
+                                                    onChange={e => setStartForm({ ...startForm, mode: e.target.value })}
+                                                    className="w-full bg-[#0a0e17] border border-gray-700 rounded px-3 py-1.5 text-sm val-green focus:outline-none">
+                                                <option value="voice">Voice (SSB)</option>
+                                                <option value="cw">CW</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="label-dim block mb-1">WPM</label>
+                                            <input type="number" value={startForm.wpm}
+                                                   onChange={e => setStartForm({ ...startForm, wpm: e.target.value })}
+                                                   className="w-full bg-[#0a0e17] border border-gray-700 rounded px-3 py-1.5 text-sm val-green focus:outline-none" />
+                                        </div>
+                                    </div>
+                                    {startError && (
+                                        <div className="text-xs val-red p-2 rounded border border-red-900 bg-red-900/20">
+                                            {startError}
+                                        </div>
+                                    )}
+                                    <div className="flex gap-2 mt-2">
+                                        <button onClick={handleStartSubmit} disabled={starting}
+                                                className={`kill-btn kill-btn-start flex-1 ${starting ? 'opacity-50' : ''}`}>
+                                            {starting ? 'CONNECTING...' : 'ENGAGE'}
+                                        </button>
+                                        <button onClick={() => setShowStartModal(false)} className="kill-btn flex-1">CANCEL</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

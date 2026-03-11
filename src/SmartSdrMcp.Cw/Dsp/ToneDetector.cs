@@ -2,8 +2,10 @@ namespace SmartSdrMcp.Cw.Dsp;
 
 /// <summary>
 /// Goertzel algorithm for efficient single-frequency tone detection.
-/// Uses percentile-based adaptive thresholding: maintains a sliding window
-/// of magnitudes and uses the 25th percentile as noise floor estimate.
+/// Two-tier detection inspired by CW Skimmer:
+///   Tier 1 (Squelch): Is there a signal? Uses percentile noise floor.
+///   Tier 2 (Keying): Is key down? Uses peak-relative thresholds with hysteresis.
+/// Both tiers use raw Magnitude — no smoothing delay in the decision path.
 /// </summary>
 public class ToneDetector
 {
@@ -21,6 +23,15 @@ public class ToneDetector
     private bool _magWindowFull;
     private const int MagWindowSize = 200; // 2 seconds at 10ms blocks
 
+    // Peak-relative keying: recent peak with moderate decay
+    private double _recentPeak;
+
+    // Squelch debounce
+    private int _signalPresentCount;
+    private int _signalAbsentCount;
+    private const int SquelchOnBlocks = 5;   // 50ms to open squelch
+    private const int SquelchOffBlocks = 20;  // 200ms to close squelch
+
     // Warmup
     private int _warmupBlocks;
     private const int WarmupBlockCount = 80; // 800ms at 10ms blocks
@@ -33,13 +44,24 @@ public class ToneDetector
     public double NoiseFloor => _noiseFloor;
     public bool TonePresent { get; private set; }
 
-    // Adaptive threshold: tone must be this many times the noise floor
-    public double OnRatio { get; set; } = 3.0;
-    public double OffRatio { get; set; } = 2.2;
+    /// <summary>
+    /// Tier 1 squelch: is there a CW signal present on this frequency?
+    /// Debounced over several blocks to avoid flicker.
+    /// </summary>
+    public bool SignalPresent { get; private set; }
 
-    // Smoothing factor for signal magnitude — must be high enough to track
-    // inter-element gaps so tone turns OFF between dits/dahs
-    public double SignalSmoothingFactor { get; set; } = 0.5;
+    // Squelch threshold: signal must exceed noise floor by this ratio
+    // Lowered from 3.0 — at S3, CW signal is only ~2.3x the 25th-pctile noise floor
+    public double SquelchRatio { get; set; } = 1.8;
+
+    // Peak-relative keying thresholds (Tier 2)
+    public double KeyOnRatio { get; set; } = 0.30;   // ON when Magnitude > recentPeak * 0.30
+    public double KeyOffRatio { get; set; } = 0.20;   // OFF when Magnitude < recentPeak * 0.20
+
+    // Legacy — kept for diagnostics but not used in decisions
+    public double OnRatio { get; set; } = 5.0;
+    public double OffRatio { get; set; } = 3.5;
+    public double SignalSmoothingFactor { get; set; } = 0.65;
 
     public ToneDetector(double targetFreq = 600, double sampleRate = 24000, int blockSizeMs = 10)
     {
@@ -77,11 +99,11 @@ public class ToneDetector
             double power = _s1 * _s1 + _s2 * _s2 - _coefficient * _s1 * _s2;
             Magnitude = Math.Sqrt(Math.Abs(power)) / _blockSize;
 
-            // Smooth the signal magnitude
+            // Smoothed magnitude — for diagnostics only, not used in keying decisions
             _smoothedMagnitude = _smoothedMagnitude * (1.0 - SignalSmoothingFactor) + Magnitude * SignalSmoothingFactor;
 
-            // Add to sliding window
-            _magWindow[_magIndex] = _smoothedMagnitude;
+            // Add raw magnitude to sliding window for noise floor estimation
+            _magWindow[_magIndex] = Magnitude;
             _magIndex = (_magIndex + 1) % MagWindowSize;
             if (_magIndex == 0) _magWindowFull = true;
 
@@ -91,6 +113,7 @@ public class ToneDetector
                 _warmupBlocks++;
                 _signalPeak = _smoothedMagnitude;
                 TonePresent = false;
+                SignalPresent = false;
 
                 if (_warmupBlocks == WarmupBlockCount)
                     UpdateNoiseFloor();
@@ -100,26 +123,58 @@ public class ToneDetector
                 return true;
             }
 
-            // Update noise floor every 10 blocks (~100ms) to avoid sorting overhead
+            // Update noise floor every 10 blocks (~100ms)
             if (_magIndex % 10 == 0)
                 UpdateNoiseFloor();
 
-            // Track signal peak (slow decay)
+            // Track overall signal peak (slow decay — for diagnostics)
             if (_smoothedMagnitude > _signalPeak)
                 _signalPeak = _smoothedMagnitude;
             else
                 _signalPeak *= 0.999;
 
-            // Adaptive hysteresis decision
-            // Use raw magnitude for OFF decisions (fast response to gaps)
-            // Use smoothed magnitude for ON decisions (noise rejection)
-            double onThreshold = _noiseFloor * OnRatio;
-            double offThreshold = _noiseFloor * OffRatio;
-
-            if (TonePresent)
-                TonePresent = Magnitude >= offThreshold;
+            // --- Tier 1: Squelch (debounced) ---
+            bool signalAboveSquelch = Magnitude > _noiseFloor * SquelchRatio;
+            if (signalAboveSquelch)
+            {
+                _signalPresentCount++;
+                _signalAbsentCount = 0;
+                if (_signalPresentCount >= SquelchOnBlocks)
+                    SignalPresent = true;
+            }
             else
-                TonePresent = _smoothedMagnitude >= onThreshold;
+            {
+                _signalAbsentCount++;
+                _signalPresentCount = 0;
+                if (_signalAbsentCount >= SquelchOffBlocks)
+                    SignalPresent = false;
+            }
+
+            // --- Tier 2: Peak-relative keying (only when signal present) ---
+            if (SignalPresent)
+            {
+                // Track recent peak: instant rise, moderate decay (~1s half-life at 10ms blocks)
+                if (Magnitude > _recentPeak)
+                    _recentPeak = Magnitude;
+                else
+                    _recentPeak *= 0.993;
+
+                // Prevent recentPeak from decaying below noise floor
+                if (_recentPeak < _noiseFloor * SquelchRatio)
+                    _recentPeak = _noiseFloor * SquelchRatio;
+
+                // Symmetric keying: both ON and OFF use raw Magnitude
+                if (TonePresent)
+                    TonePresent = Magnitude >= _recentPeak * KeyOffRatio;
+                else
+                    TonePresent = Magnitude >= _recentPeak * KeyOnRatio;
+            }
+            else
+            {
+                TonePresent = false;
+                // Let recent peak decay while no signal
+                _recentPeak *= 0.993;
+            }
 
             // Reset Goertzel for next block
             _s0 = _s1 = _s2 = 0;
@@ -135,14 +190,14 @@ public class ToneDetector
         int count = _magWindowFull ? MagWindowSize : _magIndex;
         if (count < 10) return;
 
-        // Copy and sort to find 25th percentile
         var sorted = new double[count];
         Array.Copy(_magWindow, sorted, count);
         Array.Sort(sorted);
 
-        // Use 25th percentile as noise floor estimate
-        int q1Index = count / 4;
-        _noiseFloor = sorted[q1Index];
+        // Use 10th percentile as noise floor estimate
+        // (25th percentile gets inflated during active CW at weak signal levels)
+        int pIndex = count / 10;
+        _noiseFloor = sorted[pIndex];
     }
 
     public void Reset()
@@ -153,10 +208,14 @@ public class ToneDetector
         _smoothedMagnitude = 0;
         _noiseFloor = 0;
         _signalPeak = 0;
+        _recentPeak = 0;
         _warmupBlocks = 0;
         _magIndex = 0;
         _magWindowFull = false;
+        _signalPresentCount = 0;
+        _signalAbsentCount = 0;
         Array.Clear(_magWindow);
         TonePresent = false;
+        SignalPresent = false;
     }
 }

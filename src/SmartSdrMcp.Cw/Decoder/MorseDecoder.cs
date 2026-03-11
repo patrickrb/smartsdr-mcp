@@ -32,21 +32,25 @@ public class MorseDecoder
             double durationMs = keyEvent.Duration.TotalMilliseconds;
             _wpmEstimator.AddKeyDownDuration(durationMs);
 
-            double ratio = durationMs / ditMs;
-            SymbolCandidate symbol;
+            // Adaptive sigmoid: center at midpoint between dit and dah clusters
+            double dahMs = _wpmEstimator.EstimatedDahMs;
+            double sigmoidCenter = (ditMs + dahMs) / 2.0;
+            double ratio = durationMs / sigmoidCenter;
+            double x = (ratio - 1.0) * 4.0;
+            double pDah = 1.0 / (1.0 + Math.Exp(-x));
+            double pDit = 1.0 - pDah;
 
-            if (ratio < 2.0)
+            SymbolCandidate symbol;
+            if (pDit >= pDah)
             {
-                double conf = 1.0 - Math.Abs(ratio - 1.0) * 0.5;
-                symbol = new SymbolCandidate(MorseElement.Dit, Math.Clamp(conf, 0.3, 1.0),
-                    MorseElement.Dah, Math.Clamp(1.0 - conf, 0, 0.5));
+                symbol = new SymbolCandidate(MorseElement.Dit, pDit,
+                    MorseElement.Dah, pDah);
                 _currentDitDah += ".";
             }
             else
             {
-                double conf = 1.0 - Math.Abs(ratio - 3.0) / 3.0 * 0.5;
-                symbol = new SymbolCandidate(MorseElement.Dah, Math.Clamp(conf, 0.3, 1.0),
-                    MorseElement.Dit, Math.Clamp(1.0 - conf, 0, 0.5));
+                symbol = new SymbolCandidate(MorseElement.Dah, pDah,
+                    MorseElement.Dit, pDit);
                 _currentDitDah += "-";
             }
 
@@ -64,27 +68,15 @@ public class MorseDecoder
             if (!_inCharacter) return;
 
             double gapMs = keyEvent.Duration.TotalMilliseconds;
-            double ratio = gapMs / ditMs;
 
-            // Adaptive character gap: use median intra-element gap if available
-            double medianGap = _wpmEstimator.MedianGapMs;
-            double charGapThreshold;
-            double wordGapThreshold;
+            // Feed ALL gaps to clustering — breaks self-contamination loop
+            _wpmEstimator.AddRawGapDuration(gapMs);
 
-            if (medianGap > 0)
-            {
-                // Character gap when gap > 2.5x the typical intra-element gap
-                charGapThreshold = medianGap * 2.5;
-                wordGapThreshold = medianGap * 6.0;
-            }
-            else
-            {
-                // Fallback to dit-based thresholds
-                charGapThreshold = ditMs * 2.2;
-                wordGapThreshold = ditMs * 5.0;
-            }
+            // Use clustered gap threshold (data-driven from WpmEstimator)
+            double charGapThreshold = _wpmEstimator.CharGapThresholdMs;
+            double wordGapThreshold = charGapThreshold * 2.5;
 
-            // Feed short gaps to WPM estimator as ~1T reference
+            // Also feed short gaps for legacy cross-check
             if (gapMs < charGapThreshold)
                 _wpmEstimator.AddGapDuration(gapMs);
 

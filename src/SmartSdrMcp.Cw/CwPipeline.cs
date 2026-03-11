@@ -29,16 +29,11 @@ public class CwPipeline : IDisposable
     private Timer? _timeoutTimer;
     private bool _running;
 
-    // Noise gate: track pre-AGC signal energy to avoid decoding noise
+    // RMS tracking for UI display (no longer used for gating — squelch is in ToneDetector)
     private double _signalRms;
     private double _rmsAccumulator;
     private int _rmsSampleCount;
     private const int RmsWindowSamples = 240; // 10ms at 24kHz
-    private const double NoiseGateThreshold = 0.005; // minimum RMS to process
-    private double _noiseRms; // adaptive noise floor for RMS
-    private int _rmsWarmupCount;
-    private const int RmsWarmupWindows = 80; // ~800ms warmup
-    private const double NoiseGateRatio = 1.8; // signal must be this many times noise RMS
 
     public bool IsRunning => _running;
     public double EstimatedWpm => _wpmEstimator.EstimatedWpm;
@@ -47,7 +42,7 @@ public class CwPipeline : IDisposable
     public double NoiseFloor => _toneDetector.NoiseFloor;
     public double PeakMagnitude => _toneDetector.PeakMagnitude;
     public bool TonePresent => _toneDetector.TonePresent;
-    public bool GateOpen => _signalRms > _noiseRms * NoiseGateRatio && _signalRms > NoiseGateThreshold;
+    public bool GateOpen => _toneDetector.SignalPresent;
 
     // Key event diagnostics
     private readonly Queue<string> _keyEventLog = new();
@@ -61,7 +56,7 @@ public class CwPipeline : IDisposable
     {
         _audioPipeline = audioPipeline;
         _sampleRate = sampleRate;
-        _filter = new BandPassFilter(toneFreq, 100, sampleRate);
+        _filter = new BandPassFilter(toneFreq, 80, sampleRate);
         _agc = new AgcProcessor();
         _toneDetector = new ToneDetector(toneFreq, sampleRate, 10);
         _wpmEstimator = new WpmEstimator();
@@ -76,7 +71,7 @@ public class CwPipeline : IDisposable
 
     public void SetToneFrequency(double toneFreq)
     {
-        _filter.Configure(toneFreq, 100, _sampleRate);
+        _filter.Configure(toneFreq, 80, _sampleRate);
         _toneDetector.Reconfigure(toneFreq, _sampleRate);
     }
 
@@ -132,7 +127,7 @@ public class CwPipeline : IDisposable
         {
             float filtered = _filter.Process(samples[i]);
 
-            // Track pre-AGC signal RMS for noise gate
+            // Track RMS for UI display only
             _rmsAccumulator += filtered * filtered;
             _rmsSampleCount++;
             if (_rmsSampleCount >= RmsWindowSamples)
@@ -140,23 +135,6 @@ public class CwPipeline : IDisposable
                 _signalRms = Math.Sqrt(_rmsAccumulator / _rmsSampleCount);
                 _rmsAccumulator = 0;
                 _rmsSampleCount = 0;
-
-                // Warmup: seed noise floor from initial windows
-                if (_rmsWarmupCount < RmsWarmupWindows)
-                {
-                    _rmsWarmupCount++;
-                    // Use max during warmup to establish conservative noise floor
-                    if (_signalRms > _noiseRms)
-                        _noiseRms = _signalRms;
-                }
-                else
-                {
-                    // Adaptive noise RMS: drops fast, rises moderately
-                    if (_signalRms < _noiseRms)
-                        _noiseRms += 0.1 * (_signalRms - _noiseRms);
-                    else
-                        _noiseRms += 0.02 * (_signalRms - _noiseRms);
-                }
             }
 
             // NOTE: AGC removed from tone detection path — it compresses SNR,
@@ -166,8 +144,9 @@ public class CwPipeline : IDisposable
             if (_toneDetector.ProcessSample(filtered))
             {
                 var now = DateTime.UtcNow;
-                // Rely on tone detector's own adaptive threshold (percentile-based NF)
-                _envelopeDetector.ProcessToneState(_toneDetector.TonePresent, now);
+                // Squelch is now built into ToneDetector (Tier 1 + Tier 2)
+                bool toneState = _toneDetector.TonePresent;
+                _envelopeDetector.ProcessToneState(toneState, now);
             }
         }
     }
@@ -228,8 +207,6 @@ public class CwPipeline : IDisposable
         _envelopeDetector.Reset();
         _wpmEstimator.Reset();
         _morseDecoder.Reset();
-        _noiseRms = 0;
-        _rmsWarmupCount = 0;
         _signalRms = 0;
         _rmsAccumulator = 0;
         _rmsSampleCount = 0;
